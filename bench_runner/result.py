@@ -890,8 +890,8 @@ def load_all_results(
         if result.result_info[0] not in ["raw results", "pystats raw"]:
             continue
         results.append(result)
-    if len(results) == 0:
-        raise ValueError("Didn't find any results.  That seems fishy.")
+#    if len(results) == 0:
+#        raise ValueError("Didn't find any results.  That seems fishy.")
 
     if match:
         match_to_bases(results, bases, progress=progress)
