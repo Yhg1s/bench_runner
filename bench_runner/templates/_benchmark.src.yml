@@ -161,11 +161,6 @@ jobs:
         run: |
           git gc
       - uses: fregante/setup-git-user@v2
-      - name: Setup system Python
-        if: ${{ runner.arch == 'X64' }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Checkout CPython
         uses: actions/checkout@v4
         with:
