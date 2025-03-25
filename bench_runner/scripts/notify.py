@@ -25,6 +25,8 @@ def generate_dirname(
 def _main(
     fork: str, ref: str, head: str, date: str, version: str, flags: list[str]
 ) -> None:
+    if config.get_bench_runner_config().get("notify", {}).get("notification_issue", 0) == 0:
+        return
     dirname = generate_dirname(date, version, head, flags)
     actor = os.environ.get("GITHUB_ACTOR", "UNKNOWN")
     github_repo = os.environ.get("GITHUB_REPOSITORY", "UNKNOWN")
