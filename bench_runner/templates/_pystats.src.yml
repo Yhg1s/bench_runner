@@ -52,10 +52,6 @@ jobs:
       - name: git gc
         run: |
           git gc
-      - name: Setup system Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Checkout CPython
         uses: actions/checkout@v4
         with:
