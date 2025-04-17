@@ -216,7 +216,11 @@ def tune_system(venv: PathLike, perf: bool) -> None:
     if cpu_affinity := os.environ.get("CPU_AFFINITY"):
         args.append(f'--affinity="{cpu_affinity}"')
 
-    run_in_venv(venv, "pyperf", args, sudo=True)
+    try:
+        run_in_venv(venv, "pyperf", args, sudo=True)
+    except subprocess.CalledProcessError:
+        # pyperf can fail to set IRQs, which is not a problem.
+        pass
 
     if perf:
         subprocess.check_call(
@@ -234,12 +238,16 @@ def reset_system(venv: PathLike) -> None:
     if util.get_simple_platform() != "linux":
         return
 
-    run_in_venv(
-        venv,
-        "pyperf",
-        ["system", "reset"],
-        sudo=True,
-    )
+    try:
+        run_in_venv(
+            venv,
+            "pyperf",
+            ["system", "reset"],
+            sudo=True,
+        )
+    except subprocess.CalledProcessError:
+        # pyperf can fail to reset IRQs, which is not a problem.
+        pass
 
 
 def _main(
