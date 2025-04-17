@@ -46,10 +46,6 @@ jobs:
       - name: git gc
         run: |
           git gc
-      - name: Setup system Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Build CPython and run pyperformance benchmarks
         run: |
           python workflow_bootstrap.py --pystats ${{ inputs.fork }} ${{ inputs.ref }} all ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} --run_id ${{ github.run_id }}
