@@ -112,7 +112,7 @@ jobs:
           python-version: "3.11"
       - name: Building Python and running pyperformance
         run: |
-          python workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} ${{ inputs.machine }} ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} ${{ inputs.perf && '--perf' || '' }} --run_id ${{ github.run_id }}
+          setarch -R python workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} ${{ inputs.machine }} ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} ${{ inputs.perf && '--perf' || '' }} --run_id ${{ github.run_id }}
       # Pull again, since another job may have committed results in the meantime
       - name: Pull benchmarking
         if: ${{ !inputs.perf }}
