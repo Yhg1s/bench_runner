@@ -105,11 +105,6 @@ jobs:
         run: |
           git gc
       - uses: fregante/setup-git-user@v2
-      - name: Setup system Python
-        if: ${{ runner.arch == 'X64' }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Building Python and running pyperformance
         run: |
           setarch -R python workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} ${{ inputs.machine }} ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} ${{ inputs.perf && '--perf' || '' }} --run_id ${{ github.run_id }}
