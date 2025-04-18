@@ -25,6 +25,12 @@ from bench_runner.util import log_group, PathLike
 
 from bench_runner.scripts import run_benchmarks as mrun_benchmarks
 
+def verbose_check_call(*args, **kwargs):
+    kwstr = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+    if kwstr:
+        kwstr = ", " + kwstr
+    print(f"Running check_call({args}{kwstr})", file=sys.stderr)
+    subprocess.check_call(*args, **kwargs)
 
 def get_windows_build_dir(force_32bit: bool) -> Path:
     if force_32bit:
@@ -69,7 +75,7 @@ def run_in_venv(
         args = ["sudo", f"LD_LIBRARY_PATH={ld_library_path}"] + args
 
     print("Running command:", " ".join(args))
-    subprocess.check_call(args)
+    verbose_check_call(args)
 
 
 def should_run(
@@ -166,8 +172,8 @@ def compile_unix(cpython: PathLike, flags: list[str], pgo: bool, pystats: bool) 
         make_args.extend(["-j"])
 
     with contextlib.chdir(cpython):
-        subprocess.check_call(["./configure", *args], env=env)
-        subprocess.check_call(["make", *make_args], env=env)
+        verbose_check_call(["./configure", *args], env=env)
+        verbose_check_call(["make", *make_args], env=env)
 
 
 def compile_windows(
@@ -193,7 +199,7 @@ def compile_windows(
         args.extend(shlex.split(configure_flags))
 
     with contextlib.chdir(cpython):
-        subprocess.check_call(
+        verbose_check_call(
             [
                 "powershell.exe",
                 Path("PCbuild") / "build.bat",
@@ -223,7 +229,7 @@ def tune_system(venv: PathLike, perf: bool) -> None:
         pass
 
     if perf:
-        subprocess.check_call(
+        verbose_check_call(
             [
                 "sudo",
                 "bash",
@@ -294,7 +300,7 @@ def _main(
 
         # Print out the version of Python we built just so we can confirm it's the
         # right thing in the logs
-        subprocess.check_call([get_exe_path(cpython, flags, force_32bit), "-VV"])
+        verbose_check_call([get_exe_path(cpython, flags, force_32bit), "-VV"])
 
     with log_group("Installing pyperformance"):
         install_pyperformance(venv)
