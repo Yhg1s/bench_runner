@@ -314,7 +314,7 @@ class BenchmarkComparison(Comparison):
     @property
     def memory_change_float(self) -> float | None:
         memory_change = self.memory_change
-        if memory_change in (None, "unknown"):
+        if memory_change in (None, "unknown", ""):
             return None
         else:
             return float(memory_change.strip().strip("x"))
