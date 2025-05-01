@@ -7,6 +7,7 @@ import socket
 
 
 from . import config
+from . import groups as mgroups
 from .util import PathLike
 
 
@@ -48,6 +49,7 @@ class Runner:
         if plot is None:
             plot = {"name": nickname}
         self.plot = PlotConfig(**plot)
+        self.groups = set()
 
     @property
     def name(self) -> str:
@@ -62,7 +64,7 @@ unknown_runner = Runner("unknown", "unknown", "unknown", "unknown", False, {}, N
 
 
 @functools.cache
-def get_runners(cfgpath: PathLike | None = None) -> list[Runner]:
+def _get_runners_without_groups(cfgpath: PathLike | None = None) -> list[Runner]:
     conf = config.get_bench_runner_config(cfgpath).get("runners", {})
     runners = []
     for nickname, section in conf.items():
@@ -89,10 +91,19 @@ def get_runners(cfgpath: PathLike | None = None) -> list[Runner]:
     return runners
 
 
+@functools.cache
+def get_runners(cfgpath: PathLike | None = None) -> list[Runner]:
+    runners = _get_runners_without_groups()
+    # get_groups populates runners with their groups.
+    mgroups.get_groups()
+    return runners
+
+
 def get_runners_by_hostname(cfgpath: PathLike | None = None) -> dict[str, Runner]:
     return {x.hostname: x for x in get_runners(cfgpath)}
 
 
+@functools.cache
 def get_runners_by_nickname(cfgpath: PathLike | None = None) -> dict[str, Runner]:
     return {x.nickname: x for x in get_runners(cfgpath)}
 
@@ -117,3 +128,19 @@ def get_runner_for_hostname(
     if hostname is None:
         hostname = socket.gethostname()
     return get_runners_by_hostname(cfgpath).get(hostname, unknown_runner)
+
+
+def get_runners_from_nicknames_and_groups(
+    nicknames: list[str], cfgpath: PathLike | None = None
+) -> list[Runner]:
+    result = set()
+    groups = mgroups.get_groups(cfgpath)
+    runners = get_runners_by_nickname(cfgpath)
+    for nickname in nicknames:
+        if nickname in groups:
+            result.update(groups[nickname]["runners"])
+        else:
+            if nickname not in runners:
+                raise ValueError(f"Runner {nickname} not found in bench_runner.toml")
+            result.add(runners[nickname])
+    return sorted(result, key=lambda r: r.nickname)

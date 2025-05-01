@@ -205,6 +205,30 @@ The benchmark longitudinal plot shows the change over time, per benchmark. The c
 - `head_flags`: (optional) The flags to use for the head commits
 - `base_flags`: (optional) The flags to use for the base commits
 
+#### Defining groups
+
+Runners can be organised in groups, and a group name can appear anywhere
+more than one runner nickname can appear: in the "runners" list in "weekly"
+runs, the "runners" list in longitudinal plots, as keys in the "runner_map"
+mapping in flag effect plots, and in other group definitions. They can also
+be selected from the workflow dropdown, and it schedules runs on all the
+runners in the group.
+
+```toml
+[groups.linux_gcc]
+runners = ["linux1_gcc11", "linux2-gcc12"]
+
+[groups.linux_clang]
+runners = ["linux1_clang14", "linux1_clang19"]
+
+[groups.all_clang]
+runners = ["linux_clang", "darwin_xcode"]
+
+[weekly.tailcall]
+flags = ["TAILCALL"]
+runners = ["all_clang"]
+```
+
 #### Purging old data
 
 With a local checkout of your results repository you can perform some maintenance tasks.

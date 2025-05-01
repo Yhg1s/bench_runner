@@ -743,16 +743,14 @@ class Result:
 def has_result(
     results_dir: PathLike,
     commit_hash: str,
-    machine: str,
+    nickname: str | None,
     pystats: bool,
     flags: Sequence[str],
     benchmark_hash: str,
     progress: bool = True,
 ) -> Result | None:
-    if machine in ("__really_all", "all"):
+    if nickname in ("__really_all", "all"):
         nickname = None
-    else:
-        _, _, nickname = machine.split("-")
 
     results = load_all_results([], results_dir, False, progress=progress)
 

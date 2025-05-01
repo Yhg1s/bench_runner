@@ -76,7 +76,7 @@ def should_run(
     force: bool,
     fork: str,
     ref: str,
-    machine: str,
+    nickname: str,
     pystats: bool,
     flags: list[str],
     cpython: Path = Path("cpython"),
@@ -97,7 +97,7 @@ def should_run(
     found_result = has_result(
         results_dir,
         commit_hash,
-        machine,
+        nickname,
         pystats,
         flags,
         benchmark_definitions.get_benchmark_hash(),
@@ -111,7 +111,7 @@ def should_run(
                     git.remove(results_dir.parent, filepath)
         should_run = True
     else:
-        should_run = (machine in ("__really_all", "all")) or found_result is None
+        should_run = (nickname in ("__really_all", "all")) or found_result is None
 
     return should_run
 
@@ -256,6 +256,10 @@ def _main(
     run_id: str | None = None,
     fast: bool = False,
 ):
+    nickname = machine
+    if nickname not in ("all", "__really_all"):
+        _, _, nickname = machine.split("-")
+
     venv = Path("venv")
     cpython = Path("cpython")
     platform = util.get_simple_platform()
@@ -272,7 +276,7 @@ def _main(
 
     with log_group("Determining if we need to run benchmarks"):
         if not fast and not should_run(
-            force, fork, ref, machine, False, flags, cpython=cpython
+            force, fork, ref, nickname, False, flags, cpython=cpython
         ):
             print("No need to run benchmarks.  Skipping...")
             return
