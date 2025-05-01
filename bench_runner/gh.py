@@ -11,11 +11,16 @@ from typing import Any, Mapping
 
 from . import config
 from . import flags as mflags
+from . import groups
 
 
 def get_machines():
     cfg = config.get_config()
-    return [x.name for x in cfg.runners.values() if x.available] + ["all"]
+    return (
+        list(groups.get_groups().keys())
+        + [x.name for x in cfg.runners.values() if x.available]
+        + ["all"]
+    )
 
 
 def _get_flags(d: Mapping[str, Any]) -> list[str]:

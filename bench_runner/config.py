@@ -4,6 +4,7 @@ Handles the loading of the bench_runner.toml configuration file.
 
 import dataclasses
 import functools
+import os
 from pathlib import Path
 import tomllib
 
@@ -62,9 +63,20 @@ class Weekly:
 
 
 @dataclasses.dataclass
+class Group:
+    # The runners in this group. May name other groups, which are expanded.
+    runners: list[str] = dataclasses.field(default_factory=list)
+    # The name to show for this group where it is presented as a choice
+    displayname: str = ""
+    # Whether to present this group collapsed
+    collapsed: bool = False
+
+
+@dataclasses.dataclass
 class Config:
     bases: Bases
     runners: dict[str, mrunners.Runner]
+    groups: dict[str, Group] = dataclasses.field(default_factory=dict)
     publish_mirror: PublishMirror = dataclasses.field(default_factory=PublishMirror)
     benchmarks: Benchmarks = dataclasses.field(default_factory=Benchmarks)
     notify: Notify = dataclasses.field(default_factory=Notify)
@@ -85,6 +97,10 @@ class Config:
                 nickname=name, **runner  # pyright: ignore[reportCallIssue]
             )
             for name, runner in self.runners.items()
+        }
+        self.groups = {
+            name: Group(**group) if isinstance(group, dict) else group
+            for name, group in self.groups.items()
         }
         if isinstance(self.publish_mirror, dict):
             self.publish_mirror = PublishMirror(**self.publish_mirror)

@@ -300,7 +300,10 @@ def longitudinal_plot(
             r for r in results if list(r.parsed_version.release[0:2]) == version
         ]
         if subcfg.runners:
-            cfg_runners = [r for r in runners if r.nickname in subcfg.runners]
+            # May name groups as well as individual runners.
+            cfg_runners = mrunners.get_runners_from_nicknames_and_groups(
+                subcfg.runners
+            )
         else:
             cfg_runners = runners
 
@@ -502,20 +505,26 @@ def flag_effect_plot(
         assert len(version) == 2, (
             "Version config in {subplot.name}" " should only be major.minor"
         )
+        # A mapped "from" runner may name a group, which stands for each of
+        # its runners.
+        runner_map = {}
+        for from_runner, to_runner in subplot.runner_map.items():
+            for r in mrunners.get_runners_from_nicknames_and_groups([from_runner]):
+                runner_map[r.nickname] = to_runner
 
         for runner in cfg.runners.values():
             assert runner.plot is not None
 
             if subplot.runners and runner.nickname not in subplot.runners:
                 continue
-            runner_is_mapped = runner.nickname in subplot.runner_map
-            if subplot.runner_map and not runner_is_mapped:
+            runner_is_mapped = runner.nickname in runner_map
+            if runner_map and not runner_is_mapped:
                 continue
             head_results = commits.get(runner.nickname, {}).get(
                 tuple(subplot.head_flags), {}
             )
             base_results = commits.get(
-                subplot.runner_map.get(runner.nickname, runner.nickname), {}
+                runner_map.get(runner.nickname, runner.nickname), {}
             ).get(tuple(subplot.base_flags), {})
 
             line = []
