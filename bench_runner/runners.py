@@ -139,7 +139,7 @@ def get_runners_from_nicknames_and_groups(
     runners = get_runners_by_nickname(cfgpath)
     for nickname in nicknames:
         if nickname in groups:
-            result.update(groups[nickname].runners)
+            result.update(runners[n] for n in groups[nickname].runners)
         else:
             if nickname not in runners:
                 raise ValueError(f"Runner {nickname} not found in bench_runner.toml")
