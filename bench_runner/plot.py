@@ -115,6 +115,7 @@ def get_flag_effect_plot_config():
             subplot["base_flags"] = []
         else:
             subplot["base_flags"] = sorted(set(subplot["base_flags"]))
+        subplot["runners"] = set(subplot.get("runners", ()))
         if "runner_map" not in subplot:
             subplot["runner_map"] = {}
 
@@ -502,9 +503,14 @@ def flag_effect_plot(
                 runner_map[r.nickname] = to_runner
 
         for runner in mrunners.get_runners():
+            if subplot["runners"] and runner.nickname not in subplot["runners"]:
+                continue
             runner_is_mapped = runner.nickname in runner_map
             if runner_map and not runner_is_mapped:
-                continue
+                raise ValueError(
+                    f"Unmapped runner {runner.nickname}"
+                    + f" in flag effect plot {subplot['name']}"
+                )
             head_results = commits.get(runner.nickname, {}).get(
                 tuple(sorted(subplot["head_flags"])), {}
             )
