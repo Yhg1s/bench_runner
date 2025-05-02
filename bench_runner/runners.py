@@ -78,8 +78,15 @@ def get_runners_by_hostname(cfgpath: PathLike | None = None) -> dict[str, Runner
 
 def get_runners_by_nickname(cfgpath: PathLike | None = None) -> dict[str, Runner]:
     from . import config
+    from . import groups as mgroups
 
-    return config.get_config(cfgpath).runners
+    runners = config.get_config(cfgpath).runners
+    # Groups are resolved to nicknames, so this is where a runner learns which
+    # groups it is in. Doing it here, against the one config cached for
+    # cfgpath, keeps every caller looking at the same Runner objects.
+    for group in mgroups.get_groups(cfgpath).values():
+        group.update_runners(runners)
+    return runners
 
 
 def get_nickname_for_hostname(
@@ -130,8 +137,8 @@ def get_runners_from_nicknames_and_groups(
     result: dict[str, Runner] = {}
     for nickname in nicknames:
         if nickname in groups:
-            for runner in groups[nickname].runners:
-                result[runner.nickname] = runner
+            for n in groups[nickname].runners:
+                result[n] = runners[n]
         else:
             if nickname not in runners:
                 raise ValueError(f"Runner {nickname} not found in bench_runner.toml")

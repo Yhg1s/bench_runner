@@ -11,7 +11,7 @@ class Group:
     def __init__(
         self,
         name: str,
-        runners: list[mrunners.Runner],
+        runners: set[str],
         displayname: str = "",
         collapsed: bool = False,
     ):
@@ -19,18 +19,21 @@ class Group:
         self.runners = runners
         self.displayname = displayname
         self.collapsed = collapsed
-        self.update_runners()
 
-    def update_runners(self):
-        for runner in self.runners:
-            runner.groups.add(self.name)
+    def update_runners(self, runners_by_nickname: dict[str, mrunners.Runner]):
+        for nickname in self.runners:
+            if nickname not in runners_by_nickname:
+                raise ValueError(
+                    f"Runner {nickname} in group {self.name}"
+                    + " not found in bench_runner.toml"
+                )
+
+            runners_by_nickname[nickname].groups.add(self.name)
 
 
 @functools.cache
 def get_groups(cfgpath: PathLike | None = None) -> dict[str, Group]:
-    cfg = config.get_config(cfgpath)
-    groupcfgs = cfg.groups
-    all_runners = cfg.runners
+    groupcfgs = config.get_config(cfgpath).groups
     groups: dict[str, Group] = {}
     processing = set()
 
@@ -40,23 +43,19 @@ def get_groups(cfgpath: PathLike | None = None) -> dict[str, Group]:
             return
         processing.add(name)
         groupcfg = groupcfgs[name]
-        runners = []
+        runners = set()
         for nickname in groupcfg.runners:
             if nickname in groups:
-                runners.extend(groups[nickname].runners)
+                runners.update(groups[nickname].runners)
             elif nickname in groupcfgs:
                 if nickname in processing:
                     ValueError(
                         f"Circular inclusion of groups {name!r} and {nickname!r}"
                     )
                 process_group(nickname)
-                runners.extend(groups[nickname].runners)
-            elif nickname in all_runners:
-                runners.append(all_runners[nickname])
+                runners.update(groups[nickname].runners)
             else:
-                raise ValueError(
-                    f"Runner {nickname} in group {name} not found in bench_runner.toml"
-                )
+                runners.add(nickname)
         groups[name] = Group(
             name=name,
             runners=runners,

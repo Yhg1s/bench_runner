@@ -128,13 +128,19 @@ class Config:
 
 
 @functools.cache
-def get_config(filepath: PathLike | None = None) -> Config:
-    if filepath is None:
-        filepath = Path("bench_runner.toml")
-    else:
-        filepath = Path(filepath)
-
+def _load_config(filepath: Path) -> Config:
     with filepath.open("rb") as fd:
         content = tomllib.load(fd)
 
     return Config(**content)
+
+
+def get_config(filepath: PathLike | None = None) -> Config:
+    # Resolve the path before the cache, not inside it: get_config(),
+    # get_config(None) and get_config("bench_runner.toml") all name the same
+    # file, but are three distinct keys to functools.cache, and so would build
+    # three Configs. A Runner remembers which groups it is in, so more than one
+    # Config per file means callers disagreeing about a runner's groups.
+    if filepath is None:
+        filepath = Path("bench_runner.toml")
+    return _load_config(Path(filepath))

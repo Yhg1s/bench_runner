@@ -151,7 +151,7 @@ def generate__benchmark(src: Any) -> Any:
     cfg = config.get_config()
     # Fills in runner.groups, used below so that a group name selects the jobs
     # of every runner in it.
-    mgroups.get_groups()
+    runners.get_runners_by_nickname()
     available_runners = [r for r in cfg.runners.values() if r.available]
     runner_choices = [*[x.name for x in available_runners], "all"]
 
