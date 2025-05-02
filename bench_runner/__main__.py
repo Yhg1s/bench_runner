@@ -21,6 +21,7 @@ COMMANDS = {
     "run_benchmarks": "Run benchmarks (in timing, pyperf or perf modes)",
     "synthesize_loops_file": "Create a loops file from multiple benchmark results",
     "workflow": "Run the full compile/benchmark workflow",
+    "local_workflow": "Run the full compile/benchmark workflow locally",
 }
 
 if __name__ == "__main__":
