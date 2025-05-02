@@ -10,7 +10,7 @@ from bench_runner.scripts import workflow
 
 
 def set_environment_for(machine):
-    _, _, nickname = machine.split('-')
+    _, _, nickname = machine.split("-")
     runner = runners.get_runner_by_nickname(nickname)
     if runner is runners.unknown_runner:
         raise ValueError(f"Invalid runner {machine}")
