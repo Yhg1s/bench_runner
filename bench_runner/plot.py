@@ -519,7 +519,10 @@ def flag_effect_plot(
                 continue
             runner_is_mapped = runner.nickname in runner_map
             if runner_map and not runner_is_mapped:
-                continue
+                raise ValueError(
+                    f"Unmapped runner {runner.nickname}"
+                    + f" in flag effect plot {subplot.name}"
+                )
             head_results = commits.get(runner.nickname, {}).get(
                 tuple(subplot.head_flags), {}
             )
