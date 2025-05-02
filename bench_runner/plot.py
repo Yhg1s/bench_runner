@@ -506,7 +506,7 @@ def flag_effect_plot(
             for r in mrunners.get_runners_from_nicknames_and_groups([from_runner]):
                 runner_map[r.nickname] = to_runner
         for runner in mrunners.get_runners():
-            if subplot_runners and runner.nickname not in subplot_runners:
+            if subplot_runners and runner not in subplot_runners:
                 continue
             runner_is_mapped = runner.nickname in runner_map
             if runner_map and not runner_is_mapped:
