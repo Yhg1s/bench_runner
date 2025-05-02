@@ -3,6 +3,7 @@ Handles the loading of the bench_runner.toml configuration file.
 """
 
 import functools
+import os
 from pathlib import Path
 import tomllib
 from typing import Any
@@ -25,7 +26,11 @@ def get_bench_runner_config(filepath: PathLike | None = None):
 
 def get_config_for_current_runner(filepath: PathLike | None = None) -> dict[str, Any]:
     config = get_bench_runner_config(filepath)
-    runner = runners.get_runner_for_hostname(cfgpath=filepath)
+
+    if nickname := os.environ.get("BENCHMARK_RUNNER_NAME"):
+        runner = runners.get_runner_by_nickname(nickname, cfgpath=filepath)
+    else:
+        runner = runners.get_runner_for_hostname(cfgpath=filepath)
     all_runners = config.get("runners", {})
     if len(all_runners) >= 1:
         return all_runners.get(runner.nickname, {})

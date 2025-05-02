@@ -8,6 +8,17 @@ arch = "x86_64"
 hostname = "pyperf"
 plot = { name = "Linux", color = "C0" }
 
+[runners.linux2]
+os = "linux"
+arch = "x86_64"
+hostname = "pyperf2"
+plot = { name = "Linux", color = "C1" }
+
+[groups.all_linux]
+runners = ["linux", "linux2"]
+displayname = "All linux runners"
+collapsed = true
+
 [longitudinal_plot]
 subplots = [
     { base = "3.10.4", version = "3.11" },
@@ -34,5 +45,5 @@ runners = ["linux"]
 flags = []
 
 [weekly.jit]
-runners = ["linux"]
+runners = ["all_linux"]
 flags = ["JIT"]

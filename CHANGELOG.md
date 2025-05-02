@@ -100,6 +100,11 @@ See `README.md` for more information.
 python -m pytest -m "not long_running"
 ```
 
+### Groups
+
+Runners can be organised in groups, and a group name can appear anywhere
+more than one runner name can appear; see README.md.
+
 ## v1.8.0
 
 ### bench_runner.toml change

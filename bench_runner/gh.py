@@ -12,10 +12,15 @@ from typing import Any, Mapping
 from . import config
 from . import flags as mflags
 from . import runners
+from . import groups
 
 
 def get_machines():
-    return [x.name for x in runners.get_runners() if x.available] + ["all"]
+    return (
+        list(groups.get_groups().keys())
+        + [x.name for x in runners.get_runners() if x.available]
+        + ["all"]
+    )
 
 
 def _get_flags(d: Mapping[str, Any]) -> list[str]:

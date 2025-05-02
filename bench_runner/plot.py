@@ -93,7 +93,8 @@ def get_longitudinal_plot_config():
         assert "version" in subplot
         if "flags" not in subplot:
             subplot["flags"] = []
-        subplot["runners"] = set(subplot.get("runners", ()))
+        if "runners" not in subplot:
+            subplot["runners"] = []
 
     return plots
 
@@ -322,7 +323,6 @@ def longitudinal_plot(
         axs = _axs
 
     results = [r for r in results if r.fork == "python"]
-    runners = mrunners.get_runners()
 
     for cfg, ax in zip(all_cfg, axs):
         version = [int(x) for x in cfg["version"].split(".")]
@@ -331,9 +331,9 @@ def longitudinal_plot(
             r for r in results if list(r.parsed_version.release[0:2]) == version
         ]
         if cfg["runners"]:
-            cfg_runners = [r for r in runners if r.nickname in cfg["runners"]]
+            runners = mrunners.get_runners_from_nicknames_and_groups(cfg["runners"])
         else:
-            cfg_runners = runners
+            runners = mrunners.get_runners()
 
         subtitle = f"Python {cfg['version']}.x vs. {cfg['base']}"
         if len(cfg["flags"]):
@@ -496,16 +496,20 @@ def flag_effect_plot(
         assert len(version) == 2, (
             "Version config in {subplot['name']}" " should only be major.minor"
         )
+        runner_map = {}
+        for from_runner, to_runner in subplot.get("runner_map", {}).items():
+            for r in mrunners.get_runners_from_nicknames_and_groups([from_runner]):
+                runner_map[r.nickname] = to_runner
 
         for runner in mrunners.get_runners():
-            runner_is_mapped = runner.nickname in subplot["runner_map"]
-            if subplot["runner_map"] and not runner_is_mapped:
+            runner_is_mapped = runner.nickname in runner_map
+            if runner_map and not runner_is_mapped:
                 continue
             head_results = commits.get(runner.nickname, {}).get(
                 tuple(sorted(subplot["head_flags"])), {}
             )
             base_results = commits.get(
-                subplot["runner_map"].get(runner.nickname, runner.nickname), {}
+                runner_map.get(runner.nickname, runner.nickname), {}
             ).get(tuple(sorted(subplot["base_flags"])), {})
 
             line = []
