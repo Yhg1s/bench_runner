@@ -115,7 +115,8 @@ def get_flag_effect_plot_config():
             subplot["base_flags"] = []
         else:
             subplot["base_flags"] = sorted(set(subplot["base_flags"]))
-        subplot["runners"] = set(subplot.get("runners", ()))
+        if "runners" not in subplot:
+            subplot["runners"] = []
         if "runner_map" not in subplot:
             subplot["runner_map"] = {}
 
@@ -497,13 +498,15 @@ def flag_effect_plot(
         assert len(version) == 2, (
             "Version config in {subplot['name']}" " should only be major.minor"
         )
+        subplot_runners = set(
+            mrunners.get_runners_from_nicknames_and_groups(subplot["runners"])
+        )
         runner_map = {}
         for from_runner, to_runner in subplot.get("runner_map", {}).items():
             for r in mrunners.get_runners_from_nicknames_and_groups([from_runner]):
                 runner_map[r.nickname] = to_runner
-
         for runner in mrunners.get_runners():
-            if subplot["runners"] and runner.nickname not in subplot["runners"]:
+            if subplot_runners and runner.nickname not in subplot_runners:
                 continue
             runner_is_mapped = runner.nickname in runner_map
             if runner_map and not runner_is_mapped:
