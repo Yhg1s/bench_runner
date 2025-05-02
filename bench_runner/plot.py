@@ -505,8 +505,13 @@ def flag_effect_plot(
         assert len(version) == 2, (
             "Version config in {subplot.name}" " should only be major.minor"
         )
-        # A mapped "from" runner may name a group, which stands for each of
-        # its runners.
+        # The runners list and the "from" side of the runner map may both
+        # name groups, which stand for each of their runners. Compared by
+        # nickname: Runner is a dataclass, so it is unhashable.
+        subplot_runners = {
+            r.nickname
+            for r in mrunners.get_runners_from_nicknames_and_groups(subplot.runners)
+        }
         runner_map = {}
         for from_runner, to_runner in subplot.runner_map.items():
             for r in mrunners.get_runners_from_nicknames_and_groups([from_runner]):
@@ -515,7 +520,7 @@ def flag_effect_plot(
         for runner in cfg.runners.values():
             assert runner.plot is not None
 
-            if subplot.runners and runner.nickname not in subplot.runners:
+            if subplot_runners and runner.nickname not in subplot_runners:
                 continue
             runner_is_mapped = runner.nickname in runner_map
             if runner_map and not runner_is_mapped:
