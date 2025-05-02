@@ -94,8 +94,9 @@ def _get_runners_without_groups(cfgpath: PathLike | None = None) -> list[Runner]
 @functools.cache
 def get_runners(cfgpath: PathLike | None = None) -> list[Runner]:
     runners = _get_runners_without_groups()
-    # get_groups populates runners with their groups.
-    mgroups.get_groups()
+    runners_by_nickname = {r.nickname: r for r in runners}
+    for group in mgroups.get_groups().values():
+        group.update_runners(runners_by_nickname)
     return runners
 
 
@@ -138,7 +139,7 @@ def get_runners_from_nicknames_and_groups(
     runners = get_runners_by_nickname(cfgpath)
     for nickname in nicknames:
         if nickname in groups:
-            result.update(groups[nickname]["runners"])
+            result.update(groups[nickname].runners)
         else:
             if nickname not in runners:
                 raise ValueError(f"Runner {nickname} not found in bench_runner.toml")
