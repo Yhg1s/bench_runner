@@ -566,13 +566,20 @@ def benchmark_longitudinal_plot(
         r for r in results if r.fork == "python" and r.nickname in cfg["runners"]
     ]
 
-    base = None
-    for r in results:
-        if r.version == cfg["base"] and r.flags == cfg["base_flags"]:
-            base = r
-            break
-    else:
-        raise ValueError(f"Base version {cfg['base']} not found")
+    bases = {}
+    for nickname in cfg["runners"]:
+        for r in results:
+            if (
+                r.version == cfg["base"]
+                and r.flags == cfg["base_flags"]
+                and r.nickname == nickname
+            ):
+                bases[nickname] = r
+                break
+        else:
+            raise ValueError(
+                f"Base version {cfg['base']} not found for runner {nickname}"
+            )
 
     results = [
         r
@@ -583,7 +590,7 @@ def benchmark_longitudinal_plot(
     by_benchmark = defaultdict(lambda: defaultdict(list))
     for r in results:
         if r.filename.name not in cache:
-            comparison = result.BenchmarkComparison(base, r, "")
+            comparison = result.BenchmarkComparison(bases[r.nickname], r, "")
             timing = comparison.get_timing_diff()
 
             for name, _diff, mean in timing:
