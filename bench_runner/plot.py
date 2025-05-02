@@ -342,7 +342,7 @@ def longitudinal_plot(
 
         first_runner = True
 
-        for runner in cfg_runners:
+        for runner in runners:
             runner_results = [
                 r
                 for r in ver_results
