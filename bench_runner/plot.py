@@ -301,9 +301,7 @@ def longitudinal_plot(
         ]
         if subcfg.runners:
             # May name groups as well as individual runners.
-            cfg_runners = mrunners.get_runners_from_nicknames_and_groups(
-                subcfg.runners
-            )
+            cfg_runners = mrunners.get_runners_from_nicknames_and_groups(subcfg.runners)
         else:
             cfg_runners = runners
 
