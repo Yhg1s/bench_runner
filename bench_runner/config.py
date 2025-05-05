@@ -4,7 +4,6 @@ Handles the loading of the bench_runner.toml configuration file.
 
 import dataclasses
 import functools
-import os
 from pathlib import Path
 import tomllib
 

@@ -118,9 +118,9 @@ def get_current_runner(cfgpath: PathLike | None = None) -> Runner:
     The runner this process is running as.
 
     One machine can host more than one runner, in which case the hostname does
-    not say which one this is, so an explicitly set runner wins over it.
+    not say which one this is, so an explicitly set nickname wins over it.
     """
-    if nickname := os.environ.get("BENCHMARK_RUNNER_NAME"):
+    if nickname := os.environ.get("BENCHMARK_MACHINE_NICKNAME"):
         return get_runner_by_nickname(nickname, cfgpath)
     return get_runner_for_hostname(cfgpath=cfgpath)
 
