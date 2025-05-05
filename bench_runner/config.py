@@ -27,7 +27,7 @@ def get_bench_runner_config(filepath: PathLike | None = None):
 def get_config_for_current_runner(filepath: PathLike | None = None) -> dict[str, Any]:
     config = get_bench_runner_config(filepath)
 
-    if nickname := os.environ.get("BENCHMARK_RUNNER_NAME"):
+    if nickname := os.environ.get("BENCHMARK_MACHINE_NICKNAME"):
         runner = runners.get_runner_by_nickname(nickname, cfgpath=filepath)
     else:
         runner = runners.get_runner_for_hostname(cfgpath=filepath)
