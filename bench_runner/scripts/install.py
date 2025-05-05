@@ -185,7 +185,7 @@ def generate__benchmark(src: Any) -> Any:
         ]
         if runner.include_in_all:
             machine_clauses.append("inputs.machine == 'all'")
-        for group in runner.groups:
+        for group in sorted(runner.groups):
             assert "'" not in group
             machine_clauses.append(f"inputs.machine == '{group}'")
         runner_template["if"] = f"${{{{ ({' || '.join(machine_clauses)}) }}}}"
