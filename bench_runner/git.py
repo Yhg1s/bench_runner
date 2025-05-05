@@ -140,31 +140,10 @@ def clone(
     branch: str | None = None,
     depth: int = 1,
 ) -> None:
-    is_hash = re.match(r"^[0-9a-f]{40}$", branch) if branch else False
 
     dirname = Path(dirname)
-    if dirname.is_dir():
-        if is_hash and (dirname / ".git").is_dir() and get_git_hash(dirname) == branch:
-            # This is a git repo, and the hash matches
-            return
-        shutil.rmtree(dirname)
+    if not dirname.is_dir() or not (dirname / ".git").is_dir():
+        subprocess.check_call(["git", "clone", url, str(dirname)])
 
-    # Fetching a hash and fetching a branch require different approaches
-
-    if is_hash:
-        assert branch is not None
-        dirname.mkdir()
-        with contextlib.chdir(dirname):
-            subprocess.check_call(["git", "init"])
-            subprocess.check_call(["git", "remote", "add", "origin", url])
-            subprocess.check_call(
-                ["git", "fetch", "--depth", str(depth), "origin", branch]
-            )
-            subprocess.check_call(["git", "checkout", branch])
-    else:
-        args = ["git", "clone", url, str(dirname)]
-        if branch is not None:
-            args += ["--branch", branch]
-        if depth is not None:
-            args += ["--depth", str(depth)]
-        subprocess.check_call(args)
+    with contextlib.chdir(dirname):
+        subprocess.check_call(["git", "checkout", branch])
