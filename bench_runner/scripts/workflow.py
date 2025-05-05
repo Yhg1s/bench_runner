@@ -167,6 +167,7 @@ def compile_unix(cpython: PathLike, flags: list[str], pgo: bool, pystats: bool) 
 
     with contextlib.chdir(cpython):
         subprocess.check_call(["./configure", *args], env=env)
+        subprocess.check_call(["make", *make_args, "clean"], env=env)
         subprocess.check_call(["make", *make_args], env=env)
 
 
