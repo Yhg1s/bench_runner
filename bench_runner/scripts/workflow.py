@@ -174,6 +174,10 @@ def compile_unix(
     with contextlib.chdir(cpython):
         if reconfigure:
             subprocess.check_call(["./configure", *args], env=env)
+            # Configuring again leaves the old PGO results in place, which the
+            # new build must not pick up. Only on a reconfigure: the callers
+            # that skip it are after an incremental build.
+            subprocess.check_call(["make", *make_args, "clean"], env=env)
         subprocess.check_call(["make", *make_args], env=env)
 
 
