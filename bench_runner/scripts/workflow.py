@@ -102,6 +102,7 @@ def should_run(
         flags,
         benchmark_definitions.get_benchmark_hash(),
         progress=False,
+        pattern=f"*{nickname}*{commit_hash[:7]}*",
     )
 
     if force:

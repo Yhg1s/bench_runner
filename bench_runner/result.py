@@ -760,11 +760,12 @@ def has_result(
     flags: Sequence[str],
     benchmark_hash: str,
     progress: bool = True,
+    pattern: str | None = None,
 ) -> Result | None:
     if nickname in ("__really_all", "all"):
         nickname = None
 
-    results = load_all_results([], results_dir, False, progress=progress)
+    results = load_all_results([], results_dir, False, progress=progress, pattern=pattern)
 
     if pystats:
         for result in results:
@@ -884,15 +885,19 @@ def load_all_results(
     sorted: bool = True,
     match: bool = True,
     progress: bool = True,
+    pattern: str | None = None,
 ) -> list[Result]:
     results = []
 
-    for entry in Path(results_dir).glob("**/*.json"):
+    if pattern is None:
+        pattern = "*"
+
+    for entry in Path(results_dir).glob(f"**/{pattern}.json"):
         result = Result.from_filename(entry)
         if result.result_info[0] not in ["raw results", "pystats raw"]:
             continue
         results.append(result)
-    if len(results) == 0:
+    if len(results) == 0 and pattern == "*":
         raise ValueError("Didn't find any results.  That seems fishy.")
 
     if match:
