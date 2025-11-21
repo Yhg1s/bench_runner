@@ -664,7 +664,7 @@ def benchmark_longitudinal_plot(
     fig, axs = plt.subplots(
         len(by_benchmark),
         1,
-        figsize=(10, len(by_benchmark)),
+        figsize=(20, len(by_benchmark)*3),
         layout="constrained",
     )
     if len(by_benchmark) == 1:
@@ -697,8 +697,9 @@ def benchmark_longitudinal_plot(
         ax.axhline(1.0, color="#666", linestyle="-")
         ax.set_facecolor("#f0f0f0")
         if first:
-            ax.legend(loc="upper left")
-            first = False
+            ax.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
+                      mode="expand", borderaxespad=0, ncol=3)
+            #first = False
 
     savefig(output_filename, dpi=150)
 
