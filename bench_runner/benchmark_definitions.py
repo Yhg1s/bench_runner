@@ -23,8 +23,8 @@ BENCHMARK_REPOS = [
         "pyperformance",
     ),
     BenchmarkRepo(
-        "265655e7f03ace13ec1e00e1ba299179e69f8a00",
-        "https://github.com/pyston/python-macrobenchmarks.git",
+        "fd42e372fee15bd93a1d7f1a20a37884c933709d",
+        "https://github.com/Yhg1s/python-macrobenchmarks.git",
         "pyston-benchmarks",
     ),
 ]
