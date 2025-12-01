@@ -782,7 +782,7 @@ def has_result(
                 commit_hash.startswith(result.cpython_hash)
                 and (nickname is None or result.nickname == nickname)
                 and result.flags == flags
-                and result.benchmark_hash == benchmark_hash
+#                and result.benchmark_hash == benchmark_hash
             ):
                 return result
 
