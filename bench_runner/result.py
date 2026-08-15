@@ -26,6 +26,7 @@ from . import config
 from . import flags as mflags
 from . import git
 from . import hpt
+from . import interactive_plot
 from . import plot
 from . import runners
 from . import util
@@ -37,8 +38,9 @@ CombinedData = list[tuple[str, np.ndarray | None, float]]
 
 # The number of sorted order statistics kept to describe the distribution of the
 # ref/head ratio for one benchmark. The violin plots draw at most 200 points
-# each, so keeping the whole cross product only costs memory: it is millions of
-# values, of which all but these are thrown away.
+# each (`interactive_plot._subsample`), so keeping the whole cross product only
+# costs memory: it is millions of values, of which all but these are thrown
+# away.
 VIOLIN_POINTS = 200
 
 
@@ -149,8 +151,14 @@ class BenchmarkComparison(Comparison):
             return
         yield (self.write_table, ".md", "table")
         yield (self.write_timing_plot, ".svg", "time plot")
+        yield (self.write_timing_plot_html, ".html", "interactive time plot")
         if not self.head.is_windows() and self.base == "base":
             yield (self.write_memory_plot, "-mem.svg", "memory plot")
+            yield (
+                self.write_memory_plot_html,
+                "-mem.html",
+                "interactive memory plot",
+            )
 
     @functools.cached_property
     def _contents(self) -> str | None:
@@ -306,6 +314,30 @@ class BenchmarkComparison(Comparison):
                 f"{self.head.cpython_hash}"
                 f" vs. {self.ref.version}"
             ),
+            ("less", "more"),
+        )
+
+    def _plot_title(self, what: str) -> str:
+        return (
+            f"{what} of "
+            f"{unquote(self.head.fork)}-{self.head.ref}-"
+            f"{self.head.cpython_hash}"
+            f" vs. {self.ref.version}"
+        )
+
+    def write_timing_plot_html(self, filename: PathLike) -> None:
+        interactive_plot.plot_diff_interactive(
+            self.get_timing_diff(),
+            filename,
+            self._plot_title("Timings"),
+            ("slower", "faster"),
+        )
+
+    def write_memory_plot_html(self, filename: PathLike) -> None:
+        interactive_plot.plot_diff_interactive(
+            self.get_memory_diff(),
+            filename,
+            self._plot_title("Memory usage"),
             ("less", "more"),
         )
 
@@ -649,8 +681,12 @@ class Result:
                 return ("table", base, None)
             case (["vs", base], ".svg"):
                 return ("time plot", base, None)
+            case (["vs", base], ".html"):
+                return ("interactive time plot", base, None)
             case (["vs", base, "mem"], ".svg"):
                 return ("memory plot", base, None)
+            case (["vs", base, "mem"], ".html"):
+                return ("interactive memory plot", base, None)
         raise ValueError(
             f"Unknown result type (extra={self.extra} suffix={self.suffix})"
         )
