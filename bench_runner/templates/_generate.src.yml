@@ -49,5 +49,5 @@ jobs:
         uses: EndBug/add-and-commit@290ea2c423ad77ca9c62ae0f5b224379612c0321 #v10.0.0
         if: ${{ !inputs.dry_run }}
         with:
-          add: "['results', 'README.md', 'RESULTS.md', 'longitudinal.svg', 'longitudinal.json', 'configs.svg', 'configs.json', 'memory_long.svg', 'memory_long.json', 'memory_configs.svg', 'memory_configs.json']"
+          add: "['results', 'README.md', 'RESULTS.md', 'longitudinal.svg', 'longitudinal.json', 'configs.svg', 'configs.json', 'memory_long.svg', 'memory_long.json', 'memory_configs.svg', 'memory_configs.json', 'benchmarks.svg', 'benchmarks.json']"
           message: Benchmarking results for @${{ github.actor }}
