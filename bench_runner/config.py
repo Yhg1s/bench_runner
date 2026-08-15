@@ -53,6 +53,18 @@ class Benchmarks:
 
 
 @dataclasses.dataclass
+class InteractivePlots:
+    # Where this repository's files are served as web pages, e.g. a GitHub
+    # Pages site. GitHub serves .html as source, so without it the interactive
+    # charts only work from a local clone.
+    base_url: str = ""
+
+    def __post_init__(self):
+        if self.base_url and not self.base_url.endswith("/"):
+            self.base_url += "/"
+
+
+@dataclasses.dataclass
 class Weekly:
     flags: list[str] = dataclasses.field(default_factory=list)
     runners: list[str] = dataclasses.field(default_factory=list)
@@ -71,6 +83,9 @@ class Config:
     longitudinal_plot: mplot.LongitudinalPlotConfig | None = None
     flag_effect_plot: mplot.FlagEffectPlotConfig | None = None
     benchmark_longitudinal_plot: mplot.BenchmarkLongitudinalPlotConfig | None = None
+    interactive_plots: InteractivePlots = dataclasses.field(
+        default_factory=InteractivePlots
+    )
     weekly: dict[str, Weekly] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
@@ -102,6 +117,8 @@ class Config:
             self.benchmark_longitudinal_plot = mplot.BenchmarkLongitudinalPlotConfig(
                 **self.benchmark_longitudinal_plot
             )
+        if isinstance(self.interactive_plots, dict):
+            self.interactive_plots = InteractivePlots(**self.interactive_plots)
         if len(self.weekly) == 0:
             self.weekly = {"default": Weekly(runners=list(self.runners.keys()))}
         else:

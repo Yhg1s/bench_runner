@@ -12,6 +12,17 @@ compare_to_default = []
 # List any benchmarks you want to exclude from results here
 excluded_benchmarks = []
 
+[interactive_plots]
+# Where this repository is served as a website, if it is. GitHub shows .html
+# files in a repository as source rather than rendering them, so the links to
+# the interactive charts only work if they point somewhere the files are
+# actually served from. Set this to your GitHub Pages URL (note the trailing
+# path is the repository name) after enabling Pages on the repository:
+#     base_url = "https://myorg.github.io/my-benchmarking-repo/"
+# Leave it empty to link to the files in the repository, which works in a local
+# clone but not on github.com.
+base_url = ""
+
 [notify]
 # The number of the issue in your repo that will have comments added to
 # it to send nofications
