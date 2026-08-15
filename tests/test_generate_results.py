@@ -141,3 +141,89 @@ def test_fork_with_hyphen(tmp_path):
     assert (
         contents.count("with%252dhyphen-main-3.12.0a3%2B-b0e1f9c-vs-3.11.0b3.md") == 1
     )
+
+
+# ---------------------------------------------------------------------------
+# artifact_link / html_url
+# ---------------------------------------------------------------------------
+
+
+def _with_base_url(monkeypatch, base_url):
+    from bench_runner import config
+
+    cfg = config.get_config(DATA_PATH / "bench_runner.toml")
+    monkeypatch.setattr(
+        cfg, "interactive_plots", config.InteractivePlots(base_url=base_url)
+    )
+    monkeypatch.setattr(generate_results.config, "get_config", lambda *a, **k: cfg)
+
+
+def test_html_url_is_none_without_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    assert generate_results.html_url(tmp_path / "longitudinal.html", tmp_path) is None
+
+
+def test_html_url_joins_relative_path_onto_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    url = generate_results.html_url(tmp_path / "longitudinal.html", tmp_path)
+    assert url == "https://myorg.github.io/repo/longitudinal.html"
+
+
+def test_html_url_includes_subdirectories(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    nested = tmp_path / "results" / "bm-20220323" / "linux-vs-base.html"
+    nested.parent.mkdir(parents=True)
+    nested.touch()
+    url = generate_results.html_url(nested, tmp_path)
+    assert url == (
+        "https://myorg.github.io/repo/results/bm-20220323/linux-vs-base.html"
+    )
+
+
+def test_html_url_quotes_unsafe_path_characters(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    nested = tmp_path / "results" / "fork with spaces" / "a.html"
+    nested.parent.mkdir(parents=True)
+    nested.touch()
+    url = generate_results.html_url(nested, tmp_path)
+    assert " " not in url
+    assert "fork%20with%20spaces" in url
+
+
+def test_artifact_link_html_uses_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    link = generate_results.artifact_link(
+        "chart", tmp_path / "longitudinal.html", tmp_path / "README.md", tmp_path
+    )
+    assert link == "[chart](https://myorg.github.io/repo/longitudinal.html)"
+
+
+def test_artifact_link_html_stays_relative_without_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    link = generate_results.artifact_link(
+        "chart", tmp_path / "longitudinal.html", tmp_path / "README.md", tmp_path
+    )
+    assert link == "[chart](longitudinal.html)"
+
+
+def test_artifact_link_non_html_ignores_base_url(tmp_path, monkeypatch):
+    # Only .html needs redirecting; GitHub renders .svg and .md in place.
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    for name in ("longitudinal.svg", "results.md"):
+        link = generate_results.artifact_link(
+            "x", tmp_path / name, tmp_path / "README.md", tmp_path
+        )
+        assert link == f"[x]({name})"
+
+
+def test_artifact_link_relative_to_the_index_file(tmp_path, monkeypatch):
+    # A directory index links to files sitting next to it.
+    _with_base_url(monkeypatch, "")
+    dirpath = tmp_path / "results" / "bm-20220323"
+    dirpath.mkdir(parents=True)
+    target = dirpath / "linux-vs-base.svg"
+    target.touch()
+    link = generate_results.artifact_link(
+        "plot", target, dirpath / "README.md", tmp_path
+    )
+    assert link == "[plot](linux-vs-base.svg)"
