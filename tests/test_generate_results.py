@@ -227,3 +227,58 @@ def test_artifact_link_relative_to_the_index_file(tmp_path, monkeypatch):
         "plot", target, dirpath / "README.md", tmp_path
     )
     assert link == "[plot](linux-vs-base.svg)"
+
+
+# ---------------------------------------------------------------------------
+# The generated list of top-level interactive charts
+# ---------------------------------------------------------------------------
+
+
+def test_interactive_index_lists_only_charts_that_exist(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Title\n\n<!-- START interactive -->\n\n<!-- END interactive -->\n"
+    )
+    (tmp_path / "longitudinal.html").touch()
+    (tmp_path / "benchmarks.html").touch()
+
+    generate_results.generate_interactive_index(tmp_path)
+
+    content = readme.read_text()
+    assert "longitudinal.html" in content
+    assert "benchmarks.html" in content
+    # Never generated, so it must not be linked.
+    assert "memory_configs.html" not in content
+
+
+def test_interactive_index_with_no_charts_is_empty(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Title\n\n<!-- START interactive -->\nstale\n<!-- END interactive -->\n"
+    )
+
+    generate_results.generate_interactive_index(tmp_path)
+
+    assert "stale" not in readme.read_text()
+
+
+def test_interactive_index_uses_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Title\n\n<!-- START interactive -->\n\n<!-- END interactive -->\n"
+    )
+    (tmp_path / "longitudinal.html").touch()
+
+    generate_results.generate_interactive_index(tmp_path)
+
+    assert "https://myorg.github.io/repo/longitudinal.html" in readme.read_text()
+
+
+def test_interactive_index_skips_missing_readme(tmp_path, monkeypatch):
+    # A repository whose README predates the section is left alone.
+    _with_base_url(monkeypatch, "")
+    generate_results.generate_interactive_index(tmp_path)
+    assert not (tmp_path / "README.md").exists()

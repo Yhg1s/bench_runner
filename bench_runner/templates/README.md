@@ -8,7 +8,9 @@ Here are some recent and important revisions. 👉 [Complete list of results](RE
 
 [Currently failing benchmarks](failures.md).
 
-**Key:** 📄: table, 📈: time plot, 🧠: memory plot
+**Key:** 📄: table, 📈: time plot, 🧠: memory plot, 🔍: interactive time plot, 🔬: interactive memory plot
+
+The 🔍 and 🔬 plots are the same data as 📈 and 🧠, but interactive: you can zoom and pan them, isolate a single benchmark from the legend, and toggle the box plot and the individual samples on and off.
 
 <!-- START table -->
 
@@ -29,6 +31,14 @@ The results have a resolution of 0.01 (1%).
 ![Configuration speed improvement](/configs.svg)
 
 There is also a [longitudinal plot by benchmark](/benchmarks.svg).
+
+Each of these is also available as an interactive chart, which you can zoom, pan, filter by runner from the legend, and switch to smoothed lines. All except the by-benchmark chart can also overlay a rolling average with a ±1σ band.
+
+<!-- START interactive -->
+
+<!-- END interactive -->
+
+If those links show a page of HTML source rather than a chart, this repository isn't being served as a website yet — see [viewing the interactive charts](https://github.com/faster-cpython/bench_runner#viewing-the-interactive-charts).
 
 ## Documentation
 
