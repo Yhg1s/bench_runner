@@ -8,7 +8,7 @@ import io
 from pathlib import Path
 import sys
 from typing import Iterable, TextIO, Sequence
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 
 import rich
@@ -16,6 +16,7 @@ import rich_argparse
 
 
 from bench_runner.bases import get_bases
+from bench_runner import config
 from bench_runner import flags as mflags
 from bench_runner import plot
 from bench_runner.result import (
@@ -25,6 +26,41 @@ from bench_runner.result import (
 from bench_runner import table
 from bench_runner import util
 from bench_runner.util import PathLike
+
+
+def html_url(path: PathLike, repo_dir: PathLike) -> str | None:
+    """
+    The URL an .html artifact is served at, or None if no `base_url` is
+    configured.
+
+    GitHub serves .html files out of a repository as source rather than
+    rendering them, so linking to them in the repository gives the reader a
+    page of markup. When `interactive_plots.base_url` names somewhere the
+    repository is actually served from (a GitHub Pages site, most likely), the
+    interactive charts are linked there instead.
+    """
+    base_url = config.get_config().interactive_plots.base_url
+    if not base_url:
+        return None
+    relative = Path(path).resolve().relative_to(Path(repo_dir).resolve())
+    return base_url + "/".join(quote(part) for part in relative.parts)
+
+
+def artifact_link(
+    text: str, path: PathLike, index_filename: PathLike, repo_dir: PathLike
+) -> str:
+    """
+    Link to a generated artifact from an index file.
+
+    Interactive charts go to their served URL when there is one; everything
+    else, and everything when no `base_url` is configured, stays a plain
+    repository-relative link.
+    """
+    if Path(path).suffix == ".html":
+        url = html_url(path, repo_dir)
+        if url is not None:
+            return table.md_link(text, url)
+    return table.md_link(text, str(path), index_filename)
 
 
 def _tuple_to_nested_dicts(entries: Iterable[tuple], d: dict | None = None) -> dict:
@@ -77,7 +113,11 @@ def save_generated_results(results: Iterable[Result], force: bool = False) -> No
 
 
 def output_results_index(
-    fd: TextIO, bases: Iterable[str], results: Iterable[Result], filename: PathLike
+    fd: TextIO,
+    bases: Iterable[str],
+    results: Iterable[Result],
+    filename: PathLike,
+    repo_dir: PathLike,
 ):
     """
     Outputs a results index table.
@@ -95,10 +135,11 @@ def output_results_index(
                 entry = [compare.summary, "<br>"]
                 for _, suffix, file_type in compare.get_files():
                     entry.append(
-                        table.md_link(
+                        artifact_link(
                             util.TYPE_TO_ICON[file_type],
-                            str(util.apply_suffix(compare.base_filename, suffix)),
+                            util.apply_suffix(compare.base_filename, suffix),
                             filename,
+                            repo_dir,
                         )
                     )
                 versus.append("".join(entry))
@@ -195,6 +236,7 @@ def generate_index(
     bases: Iterable[str],
     all_results: Iterable[Result],
     benchmarking_results: Iterable[Result],
+    repo_dir: PathLike,
     summarize: bool = False,
 ) -> None:
     """
@@ -215,7 +257,7 @@ def generate_index(
         content.write(f"## {runner}\n")
         if summarize:
             results = summarize_results(results)
-        output_results_index(content, bases, results, filename)
+        output_results_index(content, bases, results, filename, repo_dir)
         content.write("\n")
     table.replace_section(filename, "table", content.getvalue())
 
@@ -236,12 +278,19 @@ def generate_indices(
     """
     repo_dir = Path(repo_dir)
     generate_index(
-        repo_dir / "README.md", bases, all_results, benchmarking_results, True
+        repo_dir / "README.md",
+        bases,
+        all_results,
+        benchmarking_results,
+        repo_dir,
+        True,
     )
     results_file = repo_dir / "RESULTS.md"
     if not results_file.is_file():
         results_file = repo_dir / "results" / "README.md"
-    generate_index(results_file, bases, all_results, benchmarking_results, False)
+    generate_index(
+        results_file, bases, all_results, benchmarking_results, repo_dir, False
+    )
 
 
 def find_different_benchmarks(head: Result, ref: Result) -> tuple[list[str], list[str]]:
@@ -254,7 +303,7 @@ def find_different_benchmarks(head: Result, ref: Result) -> tuple[list[str], lis
 
 
 def get_directory_indices_entries(
-    results: Iterable[Result],
+    results: Iterable[Result], repo_dir: PathLike
 ) -> list[tuple[Path, str | None, str | None, str]]:
     entries = []
     dirpaths: set[Path] = set()
@@ -328,8 +377,11 @@ def get_directory_indices_entries(
                         dirpath,
                         result.runner,
                         base,
-                        table.md_link(
-                            util.TYPE_TO_ICON.get(type, "") + type, result.filename.name
+                        artifact_link(
+                            util.TYPE_TO_ICON.get(type, "") + type,
+                            result.filename,
+                            dirpath / "README.md",
+                            repo_dir,
                         ),
                     )
                 )
@@ -337,7 +389,7 @@ def get_directory_indices_entries(
     return entries
 
 
-def generate_directory_indices(results: Iterable[Result]) -> None:
+def generate_directory_indices(results: Iterable[Result], repo_dir: PathLike) -> None:
     """
     Generate the indices that go in each results directory.
     """
@@ -348,7 +400,7 @@ def generate_directory_indices(results: Iterable[Result]) -> None:
     # then converts that to a nested dictionary and then writes it out to each
     # of the README.md files.
 
-    entries = get_directory_indices_entries(results)
+    entries = get_directory_indices_entries(results, repo_dir)
     structure = _tuple_to_nested_dicts(entries)
 
     for dirpath, dirresults in util.track(structure.items(), "Generating indices"):
@@ -385,7 +437,7 @@ def _main(repo_dir: PathLike, force: bool = False, bases: Sequence[str] | None =
     save_generated_results(results, force=force)
     benchmarking_results = [r for r in results if r.result_info[0] == "raw results"]
     generate_indices(bases, results, benchmarking_results, repo_dir)
-    generate_directory_indices(benchmarking_results)
+    generate_directory_indices(benchmarking_results, repo_dir)
 
     memory_benchmarking_results = filter_broken_memory_results(benchmarking_results)
 
