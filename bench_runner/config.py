@@ -53,6 +53,24 @@ class Benchmarks:
 
 
 @dataclasses.dataclass
+class InteractivePlots:
+    # The base URL at which this repository's committed files are served as
+    # real web pages, e.g. a GitHub Pages site:
+    #
+    #     base_url = "https://myorg.github.io/benchmarking-public/"
+    #
+    # GitHub serves .html files out of a repository as source rather than
+    # rendering them, so without this the interactive charts can only be viewed
+    # from a local clone. When it is set, the links to interactive charts in
+    # the generated indices point here instead of at the repository.
+    base_url: str = ""
+
+    def __post_init__(self):
+        if self.base_url and not self.base_url.endswith("/"):
+            self.base_url += "/"
+
+
+@dataclasses.dataclass
 class Weekly:
     flags: list[str] = dataclasses.field(default_factory=list)
     runners: list[str] = dataclasses.field(default_factory=list)
@@ -71,6 +89,9 @@ class Config:
     longitudinal_plot: mplot.LongitudinalPlotConfig | None = None
     flag_effect_plot: mplot.FlagEffectPlotConfig | None = None
     benchmark_longitudinal_plot: mplot.BenchmarkLongitudinalPlotConfig | None = None
+    interactive_plots: InteractivePlots = dataclasses.field(
+        default_factory=InteractivePlots
+    )
     weekly: dict[str, Weekly] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
@@ -102,6 +123,8 @@ class Config:
             self.benchmark_longitudinal_plot = mplot.BenchmarkLongitudinalPlotConfig(
                 **self.benchmark_longitudinal_plot
             )
+        if isinstance(self.interactive_plots, dict):
+            self.interactive_plots = InteractivePlots(**self.interactive_plots)
         if len(self.weekly) == 0:
             self.weekly = {"default": Weekly(runners=list(self.runners.keys()))}
         else:
