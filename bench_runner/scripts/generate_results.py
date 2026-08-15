@@ -18,6 +18,7 @@ import rich_argparse
 from bench_runner.bases import get_bases
 from bench_runner import config
 from bench_runner import flags as mflags
+from bench_runner import interactive_plot
 from bench_runner import plot
 from bench_runner.result import (
     load_all_results,
@@ -26,6 +27,17 @@ from bench_runner.result import (
 from bench_runner import table
 from bench_runner import util
 from bench_runner.util import PathLike
+
+
+# The top-level interactive charts, in the order they're listed in the
+# repository's README.md.
+TOP_LEVEL_INTERACTIVE_PLOTS = [
+    ("longitudinal.html", "🔍 longitudinal"),
+    ("configs.html", "🔍 configurations"),
+    ("benchmarks.html", "🔍 by benchmark"),
+    ("memory_long.html", "🔬 memory longitudinal"),
+    ("memory_configs.html", "🔬 memory configurations"),
+]
 
 
 def html_url(path: PathLike, repo_dir: PathLike) -> str | None:
@@ -420,6 +432,34 @@ def generate_directory_indices(results: Iterable[Result], repo_dir: PathLike) ->
                     table.write_md_list(fd, subdata)
 
 
+def generate_interactive_index(repo_dir: PathLike) -> None:
+    """
+    Fill in the list of links to the top-level interactive charts, in the
+    section delimited by `<!-- START interactive -->`.
+
+    This has to be generated rather than written by hand in the README, because
+    where the charts are linked from depends on `interactive_plots.base_url`.
+    Repositories whose README predates that section are left alone.
+    """
+    repo_dir = Path(repo_dir)
+    filename = repo_dir / "README.md"
+    if not filename.is_file():
+        return
+
+    links = []
+    for name, text in TOP_LEVEL_INTERACTIVE_PLOTS:
+        path = repo_dir / name
+        if path.is_file():
+            links.append(artifact_link(text, path, filename, repo_dir))
+
+    if len(links):
+        content = "\n" + ", ".join(links) + "\n"
+    else:
+        content = "\n"
+
+    table.replace_section(filename, "interactive", content)
+
+
 def filter_broken_memory_results(results):
     return [r for r in results if r.nickname != "darwin"]
 
@@ -476,10 +516,50 @@ def _main(repo_dir: PathLike, force: bool = False, bases: Sequence[str] | None =
                 (benchmarking_results, repo_dir / "benchmarks.svg"),
                 {},
             ),
+            # The interactive counterparts of each of the above. These share
+            # the matplotlib versions' `.json` value caches, so generating both
+            # doesn't compute any comparison twice.
+            (
+                interactive_plot.longitudinal_plot_interactive,
+                (benchmarking_results, repo_dir / "longitudinal.html"),
+                {},
+            ),
+            (
+                interactive_plot.flag_effect_plot_interactive,
+                (benchmarking_results, repo_dir / "configs.html"),
+                {},
+            ),
+            (
+                interactive_plot.longitudinal_plot_interactive,
+                (memory_benchmarking_results, repo_dir / "memory_long.html"),
+                dict(
+                    getter=lambda r: r.memory_change_float,
+                    differences=("less", "more"),
+                    title="Memory usage change by major version",
+                ),
+            ),
+            (
+                interactive_plot.flag_effect_plot_interactive,
+                (memory_benchmarking_results, repo_dir / "memory_configs.html"),
+                dict(
+                    getter=lambda r: r.memory_change_float,
+                    differences=("less", "more"),
+                    title="Memory usage change by configuration",
+                ),
+            ),
+            (
+                interactive_plot.benchmark_longitudinal_plot_interactive,
+                (benchmarking_results, repo_dir / "benchmarks.html"),
+                {},
+            ),
         ],
         "Generating plots",
     ):
         plot_func(*args, **kwargs)  # type: ignore
+
+    # After the plots exist, so that only the ones that were actually produced
+    # get linked.
+    generate_interactive_index(repo_dir)
 
 
 def main():
