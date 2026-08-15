@@ -81,7 +81,10 @@ def plot_diff_pair(ax, data):
     if not len(data):
         return []
 
-    all_data = []
+    # Collected as arrays and concatenated at the end. Extending a Python list
+    # with the contents of each ndarray boxes every element into a float
+    # object, which for a whole comparison is tens of megabytes of garbage.
+    parts: list[np.ndarray] = []
     violins = []
     colors = []
 
@@ -89,17 +92,18 @@ def plot_diff_pair(ax, data):
         if values is not None:
             idx = np.round(np.linspace(0, len(values) - 1, 100)).astype(int)
             violins.append(values[idx])
-            all_data.extend(values)
+            parts.append(values)
             if name in INTERPRETER_HEAVY:
                 colors.append("red")
             else:
                 colors.append("C0")
         else:
-            violins.append([1.0])
-            all_data.extend([1.0])
+            violins.append(np.array([1.0]))
+            parts.append(np.array([1.0]))
             colors.append("C0")
             ax.text(1.01, i + 1, "insignificant")
 
+    all_data = np.concatenate(parts)
     violins.append(all_data)
 
     violin = ax.violinplot(
