@@ -24,7 +24,6 @@ from bench_runner import flags
 from bench_runner import git
 from bench_runner.result import Result
 from bench_runner.table import md_link
-from bench_runner import util
 from bench_runner.util import PathLike
 
 
@@ -209,7 +208,16 @@ def get_perf_lines(files: Iterable[PathLike]) -> Iterable[str]:
         p.kill()
 
 
-def perf_to_csv(lines: Iterable[str], output: PathLike):
+def perf_to_csv(lines: Iterable[str], output: PathLike) -> bool:
+    """
+    Convert the output of `perf report` to a csv file.
+
+    Returns whether there was anything to convert. If `lines` contains no
+    profiling data -- because it is empty, or holds nothing but headers and
+    zero-period entries -- nothing is written and this returns False, rather
+    than leaving behind a csv file with only a header row for the plotting
+    step to choke on.
+    """
     rows = []
     for line in lines:
         line = line.strip()
@@ -222,6 +230,9 @@ def perf_to_csv(lines: Iterable[str], output: PathLike):
             if period > 0.0:
                 rows.append([period, pid, command, shared, symbol])
 
+    if not rows:
+        return False
+
     rows.sort(key=itemgetter(0), reverse=True)
 
     with Path(output).open("w") as fd:
@@ -229,6 +240,8 @@ def perf_to_csv(lines: Iterable[str], output: PathLike):
         csvwriter.writerow(["self", "pid", "command", "shared_obj", "symbol"])
         for row in rows:
             csvwriter.writerow(row)
+
+    return True
 
 
 def collect_perf(python: PathLike, benchmarks: str):
@@ -249,14 +262,11 @@ def collect_perf(python: PathLike, benchmarks: str):
             extra_args=["--hook", "perf_record"],
         )
 
-        fileiter = Path(".").glob(perf_data_glob)
-        if util.has_any_element(fileiter):
-            perf_to_csv(
-                get_perf_lines(fileiter),
-                PROFILING_RESULTS / f"{benchmark}.perf.csv",
-            )
-        else:
-            print(f"No perf.data files generated for {benchmark}", file=sys.stderr)
+        if not perf_to_csv(
+            get_perf_lines(Path(".").glob(perf_data_glob)),
+            PROFILING_RESULTS / f"{benchmark}.perf.csv",
+        ):
+            print(f"No profiling data collected for {benchmark}", file=sys.stderr)
 
     for filename in Path(".").glob(perf_data_glob):
         filename.unlink()

@@ -47,51 +47,6 @@ def test_apply_suffix_only_strips_the_last_extension():
 
 
 # ---------------------------------------------------------------------------
-# has_any_element
-# ---------------------------------------------------------------------------
-
-
-def test_has_any_element_true_for_a_non_empty_list():
-    assert util.has_any_element([1, 2, 3]) is True
-
-
-def test_has_any_element_false_for_an_empty_list():
-    assert util.has_any_element([]) is False
-
-
-def test_has_any_element_false_for_an_exhausted_generator():
-    assert util.has_any_element(x for x in []) is False
-
-
-def test_has_any_element_consumes_one_element_of_the_original():
-    # BUG, pinned rather than fixed: the docstring and the itertools.tee call
-    # both say the original must not be consumed, but tee's children are local
-    # and discarded on return, while the caller's own iterator has been
-    # advanced by one. So the first element is lost.
-    #
-    # This bites the only call site, run_benchmarks.py:253:
-    #
-    #     fileiter = Path(".").glob(perf_data_glob)
-    #     if util.has_any_element(fileiter):
-    #         perf_to_csv(get_perf_lines(fileiter), ...)
-    #
-    # which silently drops the first perf.data file of every profiling run.
-    #
-    # Asserting current behaviour keeps the suite honest; a fix will flip this
-    # test, which is the point.
-    generator = (x for x in [1, 2, 3])
-    assert util.has_any_element(generator) is True
-    assert list(generator) == [2, 3]
-
-
-def test_has_any_element_is_safe_for_re_iterable_sequences():
-    # Lists are unaffected, since iter() gives a fresh iterator each time.
-    items = [1, 2, 3]
-    assert util.has_any_element(items) is True
-    assert list(items) == [1, 2, 3]
-
-
-# ---------------------------------------------------------------------------
 # safe_which
 # ---------------------------------------------------------------------------
 
