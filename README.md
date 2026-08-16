@@ -121,11 +121,40 @@ By default, pyperformance will determine the number of times to run each benchma
 measurement becomes stable.
 However, this can make comparing benchmark runs less accurate.
 It is recommended to specify one of your base benchmarking runs as the source of a hardcoded number of loops.
-To do so, add a symlink called `loops.json` to the root of your repository that points to a baseline benchmarking run, for example:
+To do so, generate a *loops table* from that run and save it as `loops.json` in the root of your repository:
 
 ```sh
-ln -s results/bm-20231002-3.12.0-0fb18b0/bm-20231002-linux-x86_64-python-v3.12.0-3.12.0-0fb18b0.json loops.json
+python -m bench_runner synthesize_loops_file -o loops.json \
+    results/bm-20231002-3.12.0-0fb18b0/bm-20231002-linux-x86_64-python-v3.12.0-3.12.0-0fb18b0.json
 ```
+
+The table is keyed by the name each benchmark function reports.
+Add `-u` to merge further runs into an existing table, or `-f` to replace it.
+Generate one table per machine; `synthesize_loops_file` refuses to merge results from different machines.
+
+> [!IMPORTANT]
+> **If you already have a `loops.json`, regenerate it.** Earlier versions of `bench_runner` passed this file to `pyperformance --same-loops`, which took a benchmark *results* file, and the documented setup was a symlink to one:
+>
+> ```sh
+> # No longer works -- a results file is not a loops table.
+> ln -s results/bm-.../bm-....json loops.json
+> ```
+>
+> `--same-loops` has been removed in favour of pyperf's `--loops-table`, which reads a different format. An old `loops.json` will be rejected; run the `synthesize_loops_file` command above on the same results file to convert it.
+
+> [!NOTE]
+> This requires a `pyperformance` new enough to accept `--loops-table`, and a `pyperf` new enough to implement it. Both are newer than the versions currently pinned in `benchmark_definitions.py` and `pyproject.toml`, so this feature does not work until those pins are bumped — see [Loops table support](#loops-table-support).
+
+##### Loops table support
+
+The loops table spans three repositories, and they have to be updated in order:
+
+1. **pyperf** implements `--loops-table` and the table format. The newest release, 2.10.0, does not have it; `pyproject.toml` pins `pyperf==2.9.0`.
+2. **pyperformance** forwards `--loops-table` through to pyperf. Upstream does not have it either, and `benchmark_definitions.py` pins a `pyperformance` commit that predates it.
+3. **bench_runner** passes the flag when `PYPERFORMANCE_LOOPS_FILE` is set, which is what this section describes.
+
+Until (1) and (2) are released and both pins here are bumped, setting `PYPERFORMANCE_LOOPS_FILE` makes `pyperformance` exit with an unrecognised-argument error before any benchmark runs.
+`bench_runner` checks the file itself and fails early with a clear message, but it cannot detect an old `pyperformance`, so leave the variable unset until the pins move.
 
 #### Plot configuration
 

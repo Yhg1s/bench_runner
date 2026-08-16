@@ -42,6 +42,41 @@ class NoBenchmarkError(Exception):
     pass
 
 
+def check_loops_table(loops_path: Path) -> None:
+    """
+    Fail fast, and locally, on a loops file pyperf would reject.
+
+    Both failure modes below otherwise surface from pyperf, inside a worker
+    process, on the runner, after the interpreter has already been built -- and
+    with an error that mentions neither bench_runner nor what to do about it.
+
+    The format changed: before pyperf grew --loops-table, the file this
+    variable pointed at was a pyperformance *results* file, and that is still
+    what the older documented `ln -s results/.../bm-....json loops.json`
+    produces. Such a file has no `table_version`, so pyperf refuses it.
+    """
+    if not loops_path.is_file():
+        raise FileNotFoundError(
+            f"{LOOPS_FILE_ENV_VAR} points at {loops_path}, which does not "
+            "exist. Generate it with `python -m bench_runner "
+            "synthesize_loops_file`, or unset the variable to let pyperf "
+            "calibrate loop counts on every run."
+        )
+    try:
+        with loops_path.open() as fd:
+            data = json.load(fd)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{loops_path} is not readable as JSON: {exc}") from exc
+    if not isinstance(data, dict) or "table_version" not in data:
+        raise ValueError(
+            f"{loops_path} is not a pyperf loops table. Loop counts used to be "
+            "taken from a benchmark results file, and a symlink to one is "
+            "probably what this is; the format is not the same. Regenerate it "
+            "with `python -m bench_runner synthesize_loops_file -o "
+            f"{loops_path.name} <results>`."
+        )
+
+
 def get_benchmark_names(benchmarks: str) -> list[str]:
     if benchmarks.strip() == "":
         benchmarks = "all"
@@ -85,8 +120,13 @@ def run_benchmarks(
         extra_args = []
 
     if loops_file := os.environ.get(LOOPS_FILE_ENV_VAR):
-        extra_args.append("--same-loops")
-        extra_args.append(loops_file)
+        # Resolved, not just made absolute: pyperformance runs each benchmark
+        # from its own directory, so a relative path would not resolve by the
+        # time pyperf reads it, and the documented way to nominate a table is a
+        # symlink, which .absolute() would leave unresolved.
+        loops_path = Path(loops_file).resolve()
+        check_loops_table(loops_path)
+        extra_args.append(f"--loops-table={loops_path}")
 
     if affinity := os.environ.get("CPU_AFFINITY"):
         extra_args.append(f"--affinity={affinity}")
