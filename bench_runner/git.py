@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-import contextlib
+import re
 import datetime
 from pathlib import Path
 import subprocess
@@ -140,11 +140,37 @@ def clone(
 ) -> None:
 
     dirname = Path(dirname)
-    if not dirname.is_dir() or not (dirname / ".git").is_dir():
-        subprocess.check_call(["git", "clone", url, str(dirname)])
+    # Benchmark repos are pinned to an exact commit, and `git clone --branch`
+    # only accepts branch and tag names, so a pinned commit has to be fetched
+    # into an empty repository instead of cloned.
+    is_hash = bool(branch and re.match(r"^[0-9a-f]{40}$", branch))
 
-    with contextlib.chdir(dirname):
-        subprocess.check_call(["git", "checkout", branch])
+    if not dirname.is_dir() or not (dirname / ".git").is_dir():
+        if not is_hash:
+            args = ["git", "clone", url, str(dirname)]
+            if branch is not None:
+                args += ["--branch", branch]
+            if depth is not None:
+                args += ["--depth", str(depth)]
+            subprocess.check_call(args)
+            return
+        dirname.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call(["git", "init", "-q"], cwd=dirname)
+
+    if branch is None:
+        return
+
+    # An existing checkout can be arbitrarily far behind origin, and `git
+    # checkout <branch>` moves to the *local* branch, which a previous run left
+    # pointing at whatever origin said then. Without a fetch this silently
+    # benchmarks stale code and reports it under the new commit's name. Fetch
+    # first, then pin the working tree to exactly what origin just gave us.
+    fetch = ["git", "fetch", url]
+    if depth is not None:
+        fetch += ["--depth", str(depth)]
+    fetch.append(branch)
+    subprocess.check_call(fetch, cwd=dirname)
+    subprocess.check_call(["git", "checkout", "FETCH_HEAD"], cwd=dirname)
 
 
 def checkout(dirname: PathLike, ref: str) -> None:
