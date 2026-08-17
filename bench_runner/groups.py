@@ -49,7 +49,7 @@ def get_groups(cfgpath: PathLike | None = None) -> dict[str, Group]:
                 runners.update(groups[nickname].runners)
             elif nickname in groupcfgs:
                 if nickname in processing:
-                    ValueError(
+                    raise ValueError(
                         f"Circular inclusion of groups {name!r} and {nickname!r}"
                     )
                 process_group(nickname)
