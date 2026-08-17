@@ -267,6 +267,20 @@ def reset_system(venv: PathLike) -> None:
         pass
 
 
+def nickname_for_machine(machine: str) -> str:
+    """
+    The runner nickname within a machine identifier.
+
+    Machine identifiers are os-arch-nickname, and the nickname is whatever the
+    runner is called in bench_runner.toml, so it may itself contain dashes.
+    Only the two known leading fields are split off.
+    """
+    if machine in ("all", "__really_all"):
+        return machine
+    _, _, nickname = machine.split("-", 2)
+    return nickname
+
+
 def _main(
     fork: str,
     ref: str,
@@ -281,9 +295,7 @@ def _main(
     run_id: str | None = None,
     fast: bool = False,
 ):
-    nickname = machine
-    if nickname not in ("all", "__really_all"):
-        _, _, nickname = machine.split("-")
+    nickname = nickname_for_machine(machine)
 
     venv = Path("venv")
     cpython = Path("cpython")
