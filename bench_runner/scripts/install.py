@@ -323,6 +323,18 @@ def _main(check: bool) -> None:
             ROOT_PATH / "bench_runner.toml",
         )
 
+    # GitHub Pages runs Jekyll over a repository by default, which on a results
+    # repository is both slow and lossy (Jekyll skips paths beginning with an
+    # underscore). This marker turns it off. It is harmless when Pages isn't in
+    # use, and it has to exist before Pages is switched on, so it's written
+    # unconditionally rather than keyed off `interactive_plots.base_url`.
+    nojekyll_path = ROOT_PATH / ".nojekyll"
+    if not nojekyll_path.is_file():
+        if check:
+            fail_check(nojekyll_path)
+        else:
+            nojekyll_path.touch()
+
     for src_path in TEMPLATE_PATH.glob("*"):
         if not src_path.is_file():
             continue

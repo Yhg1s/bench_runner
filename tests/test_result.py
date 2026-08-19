@@ -6,6 +6,9 @@ import socket
 import sys
 
 
+import pytest
+
+
 from bench_runner import result as mod_result
 
 
@@ -122,3 +125,124 @@ def test_from_scratch(monkeypatch):
         f"bm-20221119-{platform.system().lower()}-{platform.machine().lower()}"
         f"-my%2dfork-9d38120e335357a3b294-{platform.python_version()}-b7e4f1d.json"
     )
+
+
+# ---------------------------------------------------------------------------
+# Bounding the ref/head ratio cross product
+# ---------------------------------------------------------------------------
+
+
+def test_quantile_grid_shorter_than_count_is_unchanged():
+    import numpy as np
+
+    values = np.arange(10.0)
+    np.testing.assert_array_equal(mod_result._quantile_grid(values, 200), values)
+
+
+def test_quantile_grid_returns_exactly_count():
+    import numpy as np
+
+    values = np.arange(10_000.0)
+    assert len(mod_result._quantile_grid(values, 200)) == 200
+
+
+def test_quantile_grid_preserves_min_and_max_exactly():
+    import numpy as np
+
+    values = np.sort(np.random.default_rng(0).normal(size=10_000))
+    grid = mod_result._quantile_grid(values, 200)
+    # The extremes are the whole point of the violin's tails.
+    assert grid[0] == values[0]
+    assert grid[-1] == values[-1]
+
+
+def test_quantile_grid_preserves_distribution_shape():
+    import numpy as np
+
+    values = np.sort(np.random.default_rng(0).lognormal(0, 0.3, 20_000))
+    grid = mod_result._quantile_grid(values, 200)
+    quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]
+    assert np.allclose(
+        np.quantile(values, quantiles), np.quantile(grid, quantiles), atol=1e-3
+    )
+
+
+def test_analytic_mean_matches_the_full_cross_product():
+    import numpy as np
+
+    # calculate_diffs computes mean(a) * mean(1/b) instead of materializing
+    # outer(a, 1/b); the two must agree to floating point.
+    rng = np.random.default_rng(0)
+    for n_ref, n_head in [(120, 120), (400, 400), (37, 401)]:
+        ref = rng.lognormal(0, 0.3, n_ref)
+        head = rng.lognormal(0, 0.3, n_head)
+        brute = np.outer(ref, 1.0 / head).flatten().mean()
+        analytic = float(np.mean(ref) * np.mean(1.0 / head))
+        assert analytic == pytest.approx(brute, rel=1e-12)
+
+
+def test_timing_diff_is_bounded_to_violin_points(tmp_path, monkeypatch):
+    import numpy as np
+
+    results_path = _copy_results(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    results = mod_result.load_all_results(None, results_path, sorted=True, match=False)
+    by_hash = {}
+    for result in results:
+        by_hash.setdefault(result.cpython_hash[:7], result)
+
+    comparison = mod_result.BenchmarkComparison(
+        by_hash["9d38120"], by_hash["eb0004c"], "", force_valid=True
+    )
+    for _, values, _ in comparison.get_timing_diff():
+        if values is not None:
+            assert len(values) <= mod_result.VIOLIN_POINTS
+            # Already sorted, which _subsample relies on.
+            assert np.all(np.diff(values) >= 0)
+
+
+def test_cross_product_guard_does_not_move_the_reported_mean(tmp_path, monkeypatch):
+    # The guard never trips on pyperformance data (at most ~160k pairs against
+    # a 1,000,000 limit), so force it with a tiny limit and confirm that
+    # clamping the cross product leaves the reported mean untouched -- that is
+    # what makes the subsampling safe.
+    results_path = _copy_results(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    results = mod_result.load_all_results(None, results_path, sorted=True, match=False)
+    by_hash = {}
+    for result in results:
+        by_hash.setdefault(result.cpython_hash[:7], result)
+    ref, head = by_hash["9d38120"], by_hash["eb0004c"]
+
+    def means_with_limit(limit):
+        monkeypatch.setattr(mod_result, "MAX_CROSS_PRODUCT", limit)
+        mod_result.clear_contents_cache()
+        comparison = mod_result.BenchmarkComparison(ref, head, "", force_valid=True)
+        return {name: mean for name, _, mean in comparison.get_timing_diff()}
+
+    unclamped = means_with_limit(1_000_000)
+    clamped = means_with_limit(100)
+
+    assert set(unclamped) == set(clamped)
+    for name in unclamped:
+        assert clamped[name] == pytest.approx(unclamped[name], rel=1e-12)
+
+
+def test_cross_product_guard_still_bounds_the_distribution(tmp_path, monkeypatch):
+    results_path = _copy_results(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(mod_result, "MAX_CROSS_PRODUCT", 100)
+
+    results = mod_result.load_all_results(None, results_path, sorted=True, match=False)
+    by_hash = {}
+    for result in results:
+        by_hash.setdefault(result.cpython_hash[:7], result)
+
+    comparison = mod_result.BenchmarkComparison(
+        by_hash["9d38120"], by_hash["eb0004c"], "", force_valid=True
+    )
+    for _, values, _ in comparison.get_timing_diff():
+        if values is not None:
+            assert len(values) <= mod_result.VIOLIN_POINTS

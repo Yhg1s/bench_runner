@@ -148,6 +148,7 @@ def test_should_run_exists_force(benchmarks_checkout, monkeypatch):
     assert (repo / "results" / "bm-20220323-3.10.4-9d38120").is_dir()
     assert set(x.name for x in removed_paths) == {
         "bm-20220323-linux-x86_64-python-main-3.10.4-9d38120-vs-3.11.0b3.svg",
+        "bm-20220323-linux-x86_64-python-main-3.10.4-9d38120-vs-3.11.0b3.html",
         "README.md",
         "bm-20220323-linux-x86_64-python-main-3.10.4-9d38120-vs-3.11.0b3.md",
     }

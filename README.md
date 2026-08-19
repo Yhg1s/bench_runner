@@ -233,6 +233,34 @@ flags = ["TAILCALL"]
 runners = ["all_clang"]
 ```
 
+#### Viewing the interactive charts
+
+Alongside the `.svg` plots, `bench_runner` writes an interactive version of each chart as a `.html` file: the top-level `longitudinal.html`, `configs.html`, `benchmarks.html`, `memory_long.html` and `memory_configs.html`, plus a `-vs-{base}.html` next to every comparison. These can be zoomed and panned, individual runners and benchmarks can be toggled from the legend, and the longitudinal charts can overlay smoothed lines and a rolling average band.
+
+**These do not work on github.com without one extra step.** GitHub serves `.html` files out of a repository as source code, so following a link to one shows you a page of markup rather than a chart. To make them viewable, serve the repository as a website and tell `bench_runner` where that is.
+
+The recommended way is GitHub Pages, which serves the committed files directly and needs no extra workflow:
+
+1. In your results repository, go to `Settings -> Pages`.
+2. Under "Build and deployment", set "Source" to **Deploy from a branch**, and pick the `main` branch and the `/ (root)` folder.
+3. Wait for the first deployment, then note the URL GitHub shows you. It will look like `https://myorg.github.io/my-benchmarking-repo/`.
+4. Put that URL in your `bench_runner.toml`:
+
+   ```toml
+   [interactive_plots]
+   base_url = "https://myorg.github.io/my-benchmarking-repo/"
+   ```
+
+5. Re-run the `_generate` workflow (or `python -m bench_runner generate_results --force`) so the indices are rewritten with links to the served copies.
+
+A few things to know:
+
+- `python -m bench_runner install` creates an empty `.nojekyll` file at the root of your repository. Commit it. Without it, Pages runs Jekyll over every file in the repository, which is slow on a large results repository and skips paths beginning with an underscore.
+- If you publish to a public mirror (see `publish_mirror`), enable Pages on the **public** repository and use its URL. GitHub Pages on a private repository requires a paid plan.
+- The charts load plotly.js from a CDN (with a Subresource Integrity hash), so they need network access to display, and they will not render in an offline clone. That default is `PLOTLYJS_MODE` in `bench_runner/interactive_plot.py`: set it to `True` for self-contained files that work offline, or to `"directory"` to share one `plotly.min.js` per directory. Note that `True` inlines roughly 3MB into every generated `.html`, which adds up quickly in a repository that keeps one chart per result per base.
+
+If you don't want to enable Pages, leave `base_url` empty. The links stay relative, which means they work when you open the markdown from a local clone, but not on github.com. Third-party viewers such as `htmlpreview.github.io` or `raw.githack.com` can render a single file from a public repository if you paste its URL in, and either can be used as `base_url`, but both are rate-limited free services with no availability guarantee, so neither is a good default for a repository you expect people to browse.
+
 #### Purging old data
 
 With a local checkout of your results repository you can perform some maintenance tasks.

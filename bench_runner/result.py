@@ -6,6 +6,7 @@ from collections import defaultdict
 import functools
 import io
 import json
+import math
 from operator import itemgetter
 from pathlib import Path
 import re
@@ -25,6 +26,7 @@ from . import config
 from . import flags as mflags
 from . import git
 from . import hpt
+from . import interactive_plot
 from . import plot
 from . import runners
 from . import util
@@ -32,6 +34,30 @@ from .util import PathLike
 
 
 CombinedData = list[tuple[str, np.ndarray | None, float]]
+
+
+# Sorted order statistics kept per benchmark. The violins draw at most 200
+# points, so the rest of the cross product is only memory.
+VIOLIN_POINTS = 200
+
+
+# The largest cross product materialized at once, in elements. Beyond this the
+# inputs are replaced by their own quantile grids, which bounds the work
+# without noticeably changing the shape.
+MAX_CROSS_PRODUCT = 1_000_000
+
+
+def _quantile_grid(values: np.ndarray, count: int) -> np.ndarray:
+    """
+    Take `count` evenly spaced order statistics from an already sorted array.
+
+    The first and last elements are always included, so the minimum and maximum
+    are preserved exactly.
+    """
+    if len(values) <= count:
+        return values
+    idx = np.round(np.linspace(0, len(values) - 1, count)).astype(int)
+    return values[idx]
 
 
 @functools.lru_cache(maxsize=100)
@@ -118,8 +144,14 @@ class BenchmarkComparison(Comparison):
             return
         yield (self.write_table, ".md", "table")
         yield (self.write_timing_plot, ".svg", "time plot")
+        yield (self.write_timing_plot_html, ".html", "interactive time plot")
         if not self.head.is_windows() and self.base == "base":
             yield (self.write_memory_plot, "-mem.svg", "memory plot")
+            yield (
+                self.write_memory_plot_html,
+                "-mem.html",
+                "interactive memory plot",
+            )
 
     @functools.cached_property
     def _contents(self) -> str | None:
@@ -203,6 +235,19 @@ class BenchmarkComparison(Comparison):
                 abs(values - np.mean(values)) < np.multiply(m, np.std(values))
             ]
 
+        def ratio_quantiles(ref_values, head_values) -> np.ndarray:
+            """
+            The distribution of ref/head over every pair of samples, as
+            VIOLIN_POINTS sorted order statistics.
+            """
+            if len(ref_values) * len(head_values) > MAX_CROSS_PRODUCT:
+                side = math.isqrt(MAX_CROSS_PRODUCT)
+                ref_values = _quantile_grid(np.sort(ref_values), side)
+                head_values = _quantile_grid(np.sort(head_values), side)
+            values = np.outer(ref_values, 1.0 / head_values).flatten()
+            values.sort()
+            return _quantile_grid(values, VIOLIN_POINTS)
+
         def calculate_diffs(ref_values, head_values) -> tuple[np.ndarray | None, float]:
             if len(ref_values) > 3 and len(head_values) > 3:
                 sig, t_score = pyperf._utils.is_significant(ref_values, head_values)
@@ -211,9 +256,11 @@ class BenchmarkComparison(Comparison):
                 else:
                     ref_values = remove_outliers(ref_values)
                     head_values = remove_outliers(head_values)
-            values = np.outer(ref_values, 1.0 / head_values).flatten()
-            values.sort()
-            return values, float(values.mean())
+            # mean(outer(a, 1/b)) is exactly mean(a) * mean(1/b), so the mean
+            # doesn't need the cross product at all. This keeps it exact even
+            # when the returned distribution is subsampled.
+            mean = float(np.mean(ref_values) * np.mean(1.0 / head_values))
+            return ratio_quantiles(ref_values, head_values), mean
 
         cfg = config.get_config()
         excluded = cfg.benchmarks.excluded_benchmarks
@@ -260,6 +307,30 @@ class BenchmarkComparison(Comparison):
                 f"{self.head.cpython_hash}"
                 f" vs. {self.ref.version}"
             ),
+            ("less", "more"),
+        )
+
+    def _plot_title(self, what: str) -> str:
+        return (
+            f"{what} of "
+            f"{unquote(self.head.fork)}-{self.head.ref}-"
+            f"{self.head.cpython_hash}"
+            f" vs. {self.ref.version}"
+        )
+
+    def write_timing_plot_html(self, filename: PathLike) -> None:
+        interactive_plot.plot_diff_interactive(
+            self.get_timing_diff(),
+            filename,
+            self._plot_title("Timings"),
+            ("slower", "faster"),
+        )
+
+    def write_memory_plot_html(self, filename: PathLike) -> None:
+        interactive_plot.plot_diff_interactive(
+            self.get_memory_diff(),
+            filename,
+            self._plot_title("Memory usage"),
             ("less", "more"),
         )
 
@@ -603,8 +674,12 @@ class Result:
                 return ("table", base, None)
             case (["vs", base], ".svg"):
                 return ("time plot", base, None)
+            case (["vs", base], ".html"):
+                return ("interactive time plot", base, None)
             case (["vs", base, "mem"], ".svg"):
                 return ("memory plot", base, None)
+            case (["vs", base, "mem"], ".html"):
+                return ("interactive memory plot", base, None)
         raise ValueError(
             f"Unknown result type (extra={self.extra} suffix={self.suffix})"
         )

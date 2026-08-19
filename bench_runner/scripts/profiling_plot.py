@@ -424,6 +424,332 @@ def plot_pie(categories: list[tuple[float, str]], output_filename: PathLike):
     fig.savefig(output_filename, dpi=200)
 
 
+# ---------------------------------------------------------------------------
+# Interactive (plotly) versions of the two plots above.
+#
+# These render exactly the same numbers as `plot_bargraph` and `plot_pie`, but
+# to an interactive .html file rather than to an .svg, following the same
+# pattern as the interactive plots in `bench_runner.interactive_plot` - including how
+# plotly.js is delivered, which comes from `interactive_plot.PLOTLYJS_MODE`. None of the
+# matplotlib code above is modified.
+# ---------------------------------------------------------------------------
+
+
+# matplotlib hatches -> plotly pattern shapes
+PATTERN_SHAPES = {"": "", "//": "/", "\\\\": "\\"}
+
+# The color used for the time that isn't in any of the plotted categories.
+OTHER_COLOR = "#ddd"
+
+# The number of pie slices that get a text label drawn on them, matching
+# `plot_pie`.
+PIE_LABELS = 10
+
+
+def _plotly():
+    """
+    Import plotly.
+
+    This is deliberately lazy, for the same reason as in `bench_runner.plot`:
+    nothing on the non-interactive path needs it.
+    """
+    import plotly.graph_objects as go
+
+    return go
+
+
+def _plot_module():
+    """
+    `bench_runner.plot`, which owns the colour and style translation shared by
+    every interactive chart.
+
+    `bench_runner.config` has to be imported first: it and `plot` import each
+    other, and `config` evaluates `plot`'s dataclasses at class creation time.
+    """
+    from bench_runner import config  # noqa: F401
+    from bench_runner import plot
+
+    return plot
+
+
+def _interactive_module():
+    """
+    `bench_runner.interactive_plot`, which owns `save_html` and the plotly
+    settings shared by every interactive chart.
+
+    Imported lazily for the same reason as `_plot_module`.
+    """
+    from bench_runner import config  # noqa: F401
+    from bench_runner import interactive_plot
+
+    return interactive_plot
+
+
+def get_css_color_and_pattern(category: str) -> tuple[str, str]:
+    """
+    The plotly counterpart of `get_color_and_hatch`, so that a category is
+    drawn the same way in the .svg and in the .html.
+    """
+    color, hatch = get_color_and_hatch(category)
+    return _plot_module().to_css_color(color), PATTERN_SHAPES.get(hatch, "")
+
+
+def plot_bargraph_interactive(
+    results: defaultdict[str, defaultdict[str, float]],
+    categories: list[tuple[float, str]],
+    output_filename: PathLike,
+    *,
+    title: str = "Time by category, per benchmark",
+    include_plotlyjs: bool | str | None = None,
+):
+    """
+    The interactive version of `plot_bargraph`: one stacked horizontal bar per
+    benchmark, split by category.
+
+    Each category is its own trace, so it can be hidden or isolated from the
+    legend, and buttons switch between stacked bars (each benchmark's time
+    adding up to 100%) and grouped bars (categories side by side, which makes
+    them easier to compare across benchmarks).
+
+    `include_plotlyjs` defaults to
+    `bench_runner.interactive_plot.PLOTLYJS_MODE`, the same setting the rest of
+    the generated charts use.
+    """
+    go = _plotly()
+    interactive = _interactive_module()
+
+    fig = go.Figure()
+
+    names = list(results.keys())[::-1]
+    dens = {key: sum(val.values()) for key, val in results.items()}
+    den = sum(x[0] for x in categories)
+    bottom = np.zeros(len(names))
+
+    for val, category in categories:
+        if category == "unknown":
+            continue
+        values = np.array(
+            [results[name].get(category, 0.0) / dens[name] for name in names],
+            np.float64,
+        )
+        color, pattern = get_css_color_and_pattern(category)
+        fig.add_trace(
+            go.Bar(
+                x=values,
+                y=names,
+                orientation="h",
+                name=f"{category} {val / den:.2%}",
+                legendgroup=category,
+                marker={
+                    "color": color,
+                    "pattern": {"shape": pattern, "solidity": 0.4, "fgcolor": "#fff"},
+                },
+                hovertemplate=(
+                    f"<b>%{{y}}</b><br>{category}: %{{x:.2%}}<extra></extra>"
+                ),
+            )
+        )
+        bottom += values
+
+    fig.add_trace(
+        go.Bar(
+            x=1.0 - bottom,
+            y=names,
+            orientation="h",
+            name="(other functions)",
+            legendgroup="(other functions)",
+            marker={"color": OTHER_COLOR},
+            hovertemplate="<b>%{y}</b><br>(other functions): %{x:.2%}<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        template=interactive.PLOTLY_TEMPLATE,
+        barmode="stack",
+        bargap=0.4,
+        height=max(400, 22 * len(names) + 200),
+        margin={"l": 220, "r": 40, "t": 100, "b": 60},
+        hovermode="closest",
+        legend={"traceorder": "normal"},
+        updatemenus=[
+            {
+                "type": "buttons",
+                "direction": "right",
+                "showactive": True,
+                "x": 0.0,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "bottom",
+                "pad": {"b": 6},
+                "buttons": [
+                    {
+                        "label": "Stacked",
+                        "method": "relayout",
+                        "args": [{"barmode": "stack", "xaxis.range": [0.0, 1.0]}],
+                    },
+                    {
+                        "label": "Grouped",
+                        "method": "relayout",
+                        "args": [{"barmode": "group", "xaxis.autorange": True}],
+                    },
+                ],
+            },
+            {
+                "type": "buttons",
+                "direction": "right",
+                "showactive": True,
+                "x": 0.16,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "bottom",
+                "pad": {"b": 6},
+                "buttons": [
+                    {
+                        "label": "Hover: single",
+                        "method": "relayout",
+                        "args": [{"hovermode": "closest"}],
+                    },
+                    {
+                        "label": "Hover: whole bar",
+                        "method": "relayout",
+                        "args": [{"hovermode": "y unified"}],
+                    },
+                ],
+            },
+        ],
+    )
+    fig.update_xaxes(title_text="percentage time", tickformat=".0%", range=[0.0, 1.0])
+    fig.update_yaxes(categoryorder="array", categoryarray=names, automargin=True)
+
+    if include_plotlyjs is None:
+        include_plotlyjs = interactive.PLOTLYJS_MODE
+    interactive.save_html(fig, output_filename, include_plotlyjs=include_plotlyjs)
+
+    return fig
+
+
+def plot_pie_interactive(
+    categories: list[tuple[float, str]],
+    output_filename: PathLike,
+    *,
+    title: str = "Time by category, all benchmarks",
+    include_plotlyjs: bool | str | None = None,
+):
+    """
+    The interactive version of `plot_pie`: one slice per category over all of
+    the benchmarks combined.
+
+    As in `plot_pie`, only the largest `PIE_LABELS` slices are labelled, to
+    keep the chart readable; a button turns the rest of the labels on, and
+    hovering always shows the category and its percentage.
+
+    `include_plotlyjs` defaults to
+    `bench_runner.interactive_plot.PLOTLYJS_MODE`, the same setting the rest of
+    the generated charts use.
+    """
+    go = _plotly()
+    interactive = _interactive_module()
+
+    values = [x[0] for x in categories]
+    names = [x[1] for x in categories]
+    den = sum(values)
+    labels = [
+        f"{name} {value / den:.2%}" if i < PIE_LABELS else ""
+        for i, (value, name) in enumerate(zip(values, names))
+    ]
+    styles = [get_css_color_and_pattern(name) for name in names]
+    colors = [color for color, _ in styles]
+    patterns = [pattern for _, pattern in styles]
+
+    # `categories` holds absolute times, so this only kicks in when they are
+    # already fractions of a whole.
+    if den < 1.0:
+        values.append(1.0 - den)
+        names.append("(other functions)")
+        labels.append("")
+        colors.append(OTHER_COLOR)
+        patterns.append("")
+
+    fig = go.Figure(
+        go.Pie(
+            values=values,
+            labels=names,
+            text=labels,
+            textinfo="text",
+            textposition="outside",
+            textfont={"size": 11},
+            sort=False,
+            direction="clockwise",
+            marker={
+                "colors": colors,
+                "pattern": {"shape": patterns, "solidity": 0.4, "fgcolor": "#fff"},
+                "line": {"color": "#fff", "width": 1},
+            },
+            hovertemplate="<b>%{label}</b><br>%{percent}<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        title=title,
+        template=interactive.PLOTLY_TEMPLATE,
+        height=600,
+        margin={"l": 40, "r": 40, "t": 100, "b": 40},
+        updatemenus=[
+            {
+                "type": "buttons",
+                "direction": "right",
+                "showactive": True,
+                "x": 0.0,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "bottom",
+                "pad": {"b": 6},
+                "buttons": [
+                    {
+                        "label": f"Labels: top {PIE_LABELS}",
+                        "method": "restyle",
+                        "args": [{"textinfo": "text"}],
+                    },
+                    {
+                        "label": "Labels: all",
+                        "method": "restyle",
+                        "args": [{"textinfo": "label+percent"}],
+                    },
+                ],
+            },
+            {
+                "type": "buttons",
+                "direction": "right",
+                "showactive": True,
+                "x": 0.24,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "bottom",
+                "pad": {"b": 6},
+                "buttons": [
+                    {
+                        "label": "Pie",
+                        "method": "restyle",
+                        "args": [{"hole": 0.0}],
+                    },
+                    {
+                        "label": "Donut",
+                        "method": "restyle",
+                        "args": [{"hole": 0.45}],
+                    },
+                ],
+            },
+        ],
+    )
+
+    if include_plotlyjs is None:
+        include_plotlyjs = interactive.PLOTLYJS_MODE
+    interactive.save_html(fig, output_filename, include_plotlyjs=include_plotlyjs)
+
+    return fig
+
+
 def handle_tail_call_stats(
     input_dir: PathLike,
     categories: defaultdict[str, defaultdict[tuple[str, str], float]],
@@ -480,7 +806,13 @@ def handle_tail_call_stats(
             )
 
 
-def _main(input_dir: PathLike, output_prefix: PathLike):
+def _main(
+    input_dir: PathLike,
+    output_prefix: PathLike,
+    *,
+    interactive: bool = True,
+    plotly_js: bool | str | None = None,
+):
     input_dir = Path(input_dir)
     output_prefix = Path(output_prefix)
 
@@ -521,6 +853,19 @@ def _main(input_dir: PathLike, output_prefix: PathLike):
     plot_bargraph(results, sorted_categories, output_prefix.with_suffix(".svg"))
     plot_pie(sorted_categories, output_prefix.with_suffix(".pie.svg"))
 
+    if interactive:
+        plot_bargraph_interactive(
+            results,
+            sorted_categories,
+            output_prefix.with_suffix(".html"),
+            include_plotlyjs=plotly_js,
+        )
+        plot_pie_interactive(
+            sorted_categories,
+            output_prefix.with_suffix(".pie.html"),
+            include_plotlyjs=plotly_js,
+        )
+
     handle_tail_call_stats(input_dir, categories, output_prefix)
 
 
@@ -542,10 +887,39 @@ def main():
         default=Path(),
         help="The path and file prefix for the output files",
     )
+    parser.add_argument(
+        "--no-interactive",
+        action="store_true",
+        help="Don't write the interactive .html versions of the plots",
+    )
+    parser.add_argument(
+        "--plotly-js",
+        choices=["inline", "cdn", "directory"],
+        default=None,
+        help=(
+            "How the interactive plots get plotly.js: inlined into each file "
+            "(self-contained, but a few MB each), loaded from a CDN, or from a "
+            "shared plotly.min.js written next to the output. Defaults to the "
+            "same setting the rest of the charts use "
+            "(bench_runner.interactive_plot.PLOTLYJS_MODE)"
+        ),
+    )
 
     args = parser.parse_args()
 
-    _main(args.input_dir, args.output)
+    if args.plotly_js is None:
+        plotly_js = None
+    elif args.plotly_js == "inline":
+        plotly_js = True
+    else:
+        plotly_js = args.plotly_js
+
+    _main(
+        args.input_dir,
+        args.output,
+        interactive=not args.no_interactive,
+        plotly_js=plotly_js,
+    )
 
 
 if __name__ == "__main__":
