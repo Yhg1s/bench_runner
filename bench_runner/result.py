@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 import functools
 import io
+import os
 import json
 import math
 from operator import itemgetter
@@ -827,6 +828,24 @@ class Result:
         return data
 
 
+IGNORE_BENCHMARK_HASH_ENV_VAR = "BENCH_RUNNER_IGNORE_BENCHMARK_HASH"
+
+
+def ignore_benchmark_hash() -> bool:
+    """
+    Whether to reuse raw results whose benchmark corpus differs from the
+    current one.
+
+    The benchmark hash identifies the benchmark suite a result was produced
+    with, so reusing a result across a change to it compares measurements of
+    two different workloads. Updating the benchmarks therefore invalidates
+    every existing result, which is sometimes more regeneration than is wanted
+    -- hence the escape hatch, but it has to be asked for, because the cost of
+    it being on silently is a comparison that is quietly meaningless.
+    """
+    return os.environ.get(IGNORE_BENCHMARK_HASH_ENV_VAR, "") not in ("", "0", "false")
+
+
 def has_result(
     results_dir: PathLike,
     commit_hash: str,
@@ -840,7 +859,9 @@ def has_result(
     if nickname in ("__really_all", "all"):
         nickname = None
 
-    results = load_all_results([], results_dir, False, progress=progress, pattern=pattern)
+    results = load_all_results(
+        [], results_dir, False, progress=progress, pattern=pattern
+    )
 
     if pystats:
         for result in results:
@@ -852,12 +873,13 @@ def has_result(
             ):
                 return result
     else:
+        ignore_hash = ignore_benchmark_hash()
         for result in results:
             if (
                 commit_hash.startswith(result.cpython_hash)
                 and (nickname is None or result.nickname == nickname)
                 and result.flags == flags
-#                and result.benchmark_hash == benchmark_hash
+                and (ignore_hash or result.benchmark_hash == benchmark_hash)
             ):
                 return result
 

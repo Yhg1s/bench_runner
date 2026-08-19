@@ -246,3 +246,77 @@ def test_cross_product_guard_still_bounds_the_distribution(tmp_path, monkeypatch
     for _, values, _ in comparison.get_timing_diff():
         if values is not None:
             assert len(values) <= mod_result.VIOLIN_POINTS
+
+
+# ---------------------------------------------------------------------------
+# benchmark_hash gating in has_result
+# ---------------------------------------------------------------------------
+
+
+def _a_raw_result(tmp_path, monkeypatch):
+    results_path = _copy_results(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    results = mod_result.load_all_results(None, results_path, sorted=True, match=False)
+    raw = [r for r in results if r.result_info[0] == "raw results"]
+    assert raw, "no raw results in the test data"
+    return results_path, raw[0]
+
+
+def test_has_result_finds_a_matching_result(tmp_path, monkeypatch):
+    results_path, result = _a_raw_result(tmp_path, monkeypatch)
+    found = mod_result.has_result(
+        results_path,
+        result.cpython_hash,
+        result.nickname,
+        False,
+        result.flags,
+        result.benchmark_hash,
+        progress=False,
+    )
+    assert found is not None
+
+
+def test_has_result_rejects_a_different_benchmark_hash(tmp_path, monkeypatch):
+    """
+    A result produced with a different benchmark corpus measures a different
+    workload, so reusing it compares two different things.
+    """
+    results_path, result = _a_raw_result(tmp_path, monkeypatch)
+    found = mod_result.has_result(
+        results_path,
+        result.cpython_hash,
+        result.nickname,
+        False,
+        result.flags,
+        "0000000000",
+        progress=False,
+    )
+    assert found is None
+
+
+def test_has_result_can_be_told_to_ignore_the_benchmark_hash(tmp_path, monkeypatch):
+    # Updating the benchmarks invalidates every result, which is sometimes more
+    # regeneration than is wanted -- but it has to be asked for explicitly.
+    results_path, result = _a_raw_result(tmp_path, monkeypatch)
+    monkeypatch.setenv(mod_result.IGNORE_BENCHMARK_HASH_ENV_VAR, "1")
+    found = mod_result.has_result(
+        results_path,
+        result.cpython_hash,
+        result.nickname,
+        False,
+        result.flags,
+        "0000000000",
+        progress=False,
+    )
+    assert found is not None
+
+
+@pytest.mark.parametrize("value", ["", "0", "false"])
+def test_ignore_benchmark_hash_is_off_for_falsey_values(monkeypatch, value):
+    monkeypatch.setenv(mod_result.IGNORE_BENCHMARK_HASH_ENV_VAR, value)
+    assert mod_result.ignore_benchmark_hash() is False
+
+
+def test_ignore_benchmark_hash_is_off_by_default(monkeypatch):
+    monkeypatch.delenv(mod_result.IGNORE_BENCHMARK_HASH_ENV_VAR, raising=False)
+    assert mod_result.ignore_benchmark_hash() is False
