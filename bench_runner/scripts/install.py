@@ -20,6 +20,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 
 from bench_runner import config
 from bench_runner import flags
+from bench_runner import groups as mgroups
 from bench_runner import runners
 from bench_runner.util import PathLike
 
@@ -148,6 +149,9 @@ def generate__benchmark(src: Any) -> Any:
     user.
     """
     cfg = config.get_config()
+    # Fills in runner.groups, used below so that a group name selects the jobs
+    # of every runner in it.
+    runners.get_runners_by_nickname()
     available_runners = [r for r in cfg.runners.values() if r.available]
     runner_choices = [*[x.name for x in available_runners], "all"]
 
@@ -166,6 +170,7 @@ def generate__benchmark(src: Any) -> Any:
             github_env = "$GITHUB_ENV"
         vars = copy.copy(runner.env)
         vars["BENCHMARK_MACHINE_NICKNAME"] = runner.nickname
+        vars["BENCHMARK_RUNNER_NAME"] = runner.name
         setup_environment = {
             "name": "Setup environment",
             "run": LiteralScalarString(
@@ -184,6 +189,9 @@ def generate__benchmark(src: Any) -> Any:
         ]
         if runner.include_in_all:
             machine_clauses.append("inputs.machine == 'all'")
+        for group in sorted(runner.groups):
+            assert "'" not in group
+            machine_clauses.append(f"inputs.machine == '{group}'")
         runner_template["if"] = f"${{{{ ({' || '.join(machine_clauses)}) }}}}"
 
         dst["jobs"][f"benchmark-{runner.name}"] = runner_template
@@ -202,12 +210,18 @@ def generate_benchmark(dst: Any) -> Any:
     """
     Generates benchmark.yml from benchmark.src.yml.
 
-    Inserts the list of available machines to the drop-down presented to the
-    user.
+    Inserts the list of groups and available machines to the drop-down
+    presented to the user.
     """
     cfg = config.get_config()
     available_runners = [r for r in cfg.runners.values() if r.available]
-    runner_choices = [*[x.name for x in available_runners], "all", "__really_all"]
+    groups = sorted(mgroups.get_groups().keys())
+    runner_choices = [
+        *groups,
+        *[x.name for x in available_runners],
+        "all",
+        "__really_all",
+    ]
 
     dst["on"]["workflow_dispatch"]["inputs"]["machine"]["options"] = runner_choices
 
@@ -257,12 +271,11 @@ def generate__weekly(dst: Any) -> Any:
 
     all_jobs = []
     for name, weekly_cfg in cfg.weekly.items():
-        for runner_nickname in weekly_cfg.runners:
-            runner = runners.get_runner_by_nickname(runner_nickname)
-            if runner.nickname == "unknown":
-                raise ValueError(
-                    f"Runner {runner_nickname} not found in bench_runner.toml"
-                )
+        # Nicknames here may name a group as well as a single runner. The
+        # helper raises for anything it does not recognise, which is the check
+        # that used to be inline here.
+        cfg_runners = runners.get_runners_from_nicknames_and_groups(weekly_cfg.runners)
+        for runner in cfg_runners:
             job = {
                 "uses": "./.github/workflows/_benchmark.yml",
                 "needs": "determine_head",

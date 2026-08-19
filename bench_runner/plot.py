@@ -300,7 +300,8 @@ def longitudinal_plot(
             r for r in results if list(r.parsed_version.release[0:2]) == version
         ]
         if subcfg.runners:
-            cfg_runners = [r for r in runners if r.nickname in subcfg.runners]
+            # May name groups as well as individual runners.
+            cfg_runners = mrunners.get_runners_from_nicknames_and_groups(subcfg.runners)
         else:
             cfg_runners = runners
 
@@ -502,20 +503,34 @@ def flag_effect_plot(
         assert len(version) == 2, (
             "Version config in {subplot.name}" " should only be major.minor"
         )
+        # The runners list and the "from" side of the runner map may both
+        # name groups, which stand for each of their runners. Compared by
+        # nickname: Runner is a dataclass, so it is unhashable.
+        subplot_runners = {
+            r.nickname
+            for r in mrunners.get_runners_from_nicknames_and_groups(subplot.runners)
+        }
+        runner_map = {}
+        for from_runner, to_runner in subplot.runner_map.items():
+            for r in mrunners.get_runners_from_nicknames_and_groups([from_runner]):
+                runner_map[r.nickname] = to_runner
 
         for runner in cfg.runners.values():
             assert runner.plot is not None
 
-            if subplot.runners and runner.nickname not in subplot.runners:
+            if subplot_runners and runner.nickname not in subplot_runners:
                 continue
-            runner_is_mapped = runner.nickname in subplot.runner_map
-            if subplot.runner_map and not runner_is_mapped:
-                continue
+            runner_is_mapped = runner.nickname in runner_map
+            if runner_map and not runner_is_mapped:
+                raise ValueError(
+                    f"Unmapped runner {runner.nickname}"
+                    + f" in flag effect plot {subplot.name}"
+                )
             head_results = commits.get(runner.nickname, {}).get(
                 tuple(subplot.head_flags), {}
             )
             base_results = commits.get(
-                subplot.runner_map.get(runner.nickname, runner.nickname), {}
+                runner_map.get(runner.nickname, runner.nickname), {}
             ).get(tuple(subplot.base_flags), {})
 
             line = []
@@ -601,13 +616,18 @@ def benchmark_longitudinal_plot(
 
     results = [r for r in results if r.fork == "python" and r.nickname in cfg.runners]
 
-    base = None
-    for r in results:
-        if r.version == cfg.base and r.flags == cfg.base_flags:
-            base = r
-            break
-    else:
-        raise ValueError(f"Base version {cfg.base} not found")
+    bases = {}
+    for nickname in cfg.runners:
+        for r in results:
+            if (
+                r.version == cfg.base
+                and r.flags == cfg.base_flags
+                and r.nickname == nickname
+            ):
+                bases[nickname] = r
+                break
+        else:
+            raise ValueError(f"Base version {cfg.base} not found for runner {nickname}")
 
     results = [
         r
@@ -618,7 +638,7 @@ def benchmark_longitudinal_plot(
     by_benchmark = defaultdict(lambda: defaultdict(list))
     for r in results:
         if r.filename.name not in cache:
-            comparison = result.BenchmarkComparison(base, r, "")
+            comparison = result.BenchmarkComparison(bases[r.nickname], r, "")
             timing = comparison.get_timing_diff()
 
             for name, _diff, mean in timing:
@@ -644,7 +664,7 @@ def benchmark_longitudinal_plot(
     fig, axs = plt.subplots(
         len(by_benchmark),
         1,
-        figsize=(10, len(by_benchmark)),
+        figsize=(20, len(by_benchmark)*3),
         layout="constrained",
     )
     if len(by_benchmark) == 1:
@@ -677,8 +697,9 @@ def benchmark_longitudinal_plot(
         ax.axhline(1.0, color="#666", linestyle="-")
         ax.set_facecolor("#f0f0f0")
         if first:
-            ax.legend(loc="upper left")
-            first = False
+            ax.legend(bbox_to_anchor=(0, 1.02, 1, 0.2), loc="lower left",
+                      mode="expand", borderaxespad=0, ncol=3)
+            #first = False
 
     savefig(output_filename, dpi=150)
 
