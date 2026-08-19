@@ -141,3 +141,144 @@ def test_fork_with_hyphen(tmp_path):
     assert (
         contents.count("with%252dhyphen-main-3.12.0a3%2B-b0e1f9c-vs-3.11.0b3.md") == 1
     )
+
+
+# ---------------------------------------------------------------------------
+# artifact_link / html_url
+# ---------------------------------------------------------------------------
+
+
+def _with_base_url(monkeypatch, base_url):
+    from bench_runner import config
+
+    cfg = config.get_config(DATA_PATH / "bench_runner.toml")
+    monkeypatch.setattr(
+        cfg, "interactive_plots", config.InteractivePlots(base_url=base_url)
+    )
+    monkeypatch.setattr(generate_results.config, "get_config", lambda *a, **k: cfg)
+
+
+def test_html_url_is_none_without_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    assert generate_results.html_url(tmp_path / "longitudinal.html", tmp_path) is None
+
+
+def test_html_url_joins_relative_path_onto_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    url = generate_results.html_url(tmp_path / "longitudinal.html", tmp_path)
+    assert url == "https://myorg.github.io/repo/longitudinal.html"
+
+
+def test_html_url_includes_subdirectories(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    nested = tmp_path / "results" / "bm-20220323" / "linux-vs-base.html"
+    nested.parent.mkdir(parents=True)
+    nested.touch()
+    url = generate_results.html_url(nested, tmp_path)
+    assert url == (
+        "https://myorg.github.io/repo/results/bm-20220323/linux-vs-base.html"
+    )
+
+
+def test_html_url_quotes_unsafe_path_characters(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    nested = tmp_path / "results" / "fork with spaces" / "a.html"
+    nested.parent.mkdir(parents=True)
+    nested.touch()
+    url = generate_results.html_url(nested, tmp_path)
+    assert " " not in url
+    assert "fork%20with%20spaces" in url
+
+
+def test_artifact_link_html_uses_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    link = generate_results.artifact_link(
+        "chart", tmp_path / "longitudinal.html", tmp_path / "README.md", tmp_path
+    )
+    assert link == "[chart](https://myorg.github.io/repo/longitudinal.html)"
+
+
+def test_artifact_link_html_stays_relative_without_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    link = generate_results.artifact_link(
+        "chart", tmp_path / "longitudinal.html", tmp_path / "README.md", tmp_path
+    )
+    assert link == "[chart](longitudinal.html)"
+
+
+def test_artifact_link_non_html_ignores_base_url(tmp_path, monkeypatch):
+    # Only .html needs redirecting; GitHub renders .svg and .md in place.
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    for name in ("longitudinal.svg", "results.md"):
+        link = generate_results.artifact_link(
+            "x", tmp_path / name, tmp_path / "README.md", tmp_path
+        )
+        assert link == f"[x]({name})"
+
+
+def test_artifact_link_relative_to_the_index_file(tmp_path, monkeypatch):
+    # A directory index links to files sitting next to it.
+    _with_base_url(monkeypatch, "")
+    dirpath = tmp_path / "results" / "bm-20220323"
+    dirpath.mkdir(parents=True)
+    target = dirpath / "linux-vs-base.svg"
+    target.touch()
+    link = generate_results.artifact_link(
+        "plot", target, dirpath / "README.md", tmp_path
+    )
+    assert link == "[plot](linux-vs-base.svg)"
+
+
+# ---------------------------------------------------------------------------
+# The generated list of top-level interactive charts
+# ---------------------------------------------------------------------------
+
+
+def test_interactive_index_lists_only_charts_that_exist(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Title\n\n<!-- START interactive -->\n\n<!-- END interactive -->\n"
+    )
+    (tmp_path / "longitudinal.html").touch()
+    (tmp_path / "benchmarks.html").touch()
+
+    generate_results.generate_interactive_index(tmp_path)
+
+    content = readme.read_text()
+    assert "longitudinal.html" in content
+    assert "benchmarks.html" in content
+    # Never generated, so it must not be linked.
+    assert "memory_configs.html" not in content
+
+
+def test_interactive_index_with_no_charts_is_empty(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Title\n\n<!-- START interactive -->\nstale\n<!-- END interactive -->\n"
+    )
+
+    generate_results.generate_interactive_index(tmp_path)
+
+    assert "stale" not in readme.read_text()
+
+
+def test_interactive_index_uses_base_url(tmp_path, monkeypatch):
+    _with_base_url(monkeypatch, "https://myorg.github.io/repo/")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# Title\n\n<!-- START interactive -->\n\n<!-- END interactive -->\n"
+    )
+    (tmp_path / "longitudinal.html").touch()
+
+    generate_results.generate_interactive_index(tmp_path)
+
+    assert "https://myorg.github.io/repo/longitudinal.html" in readme.read_text()
+
+
+def test_interactive_index_skips_missing_readme(tmp_path, monkeypatch):
+    # A repository whose README predates the section is left alone.
+    _with_base_url(monkeypatch, "")
+    generate_results.generate_interactive_index(tmp_path)
+    assert not (tmp_path / "README.md").exists()

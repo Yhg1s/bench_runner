@@ -17,6 +17,8 @@ TYPE_TO_ICON = {
     "table": "📄",
     "time plot": "📈",
     "memory plot": "🧠",
+    "interactive time plot": "🔍",
+    "interactive memory plot": "🔬",
 }
 
 
