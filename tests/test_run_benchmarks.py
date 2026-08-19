@@ -7,6 +7,9 @@ import subprocess
 import sys
 
 
+import pytest
+
+
 from bench_runner import benchmark_definitions
 from bench_runner import git
 from bench_runner.scripts import run_benchmarks
@@ -351,3 +354,116 @@ def test_collect_perf_reports_a_benchmark_that_produced_no_perf_data(
     assert seen == []
     assert not (tmp_path / "profiling" / "results" / "deepcopy.perf.csv").exists()
     assert "No profiling data collected for deepcopy" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --loops-table passthrough
+# ---------------------------------------------------------------------------
+
+
+def _write_loops_table(path, loops=None):
+    path.write_text(
+        json.dumps(
+            {
+                "table_version": 1,
+                "min_time": 0.1,
+                "machine": {
+                    "hostname": "h",
+                    "platform": "p",
+                    "python": "3.14.0",
+                    "date": "2026-01-01T00:00:00",
+                },
+                "loops": loops or {"nbody": 64},
+            }
+        )
+    )
+    return path
+
+
+def _stub_pyperformance(tmp_path, monkeypatch):
+    """
+    Capture the pyperformance command line without running it.
+
+    run_benchmarks unlinks the output file before the run and insists it exists
+    afterwards, so the stub has to produce it.
+    """
+    output = tmp_path / "benchmark.json"
+    monkeypatch.setattr(run_benchmarks, "BENCHMARK_JSON", output)
+    captured = []
+
+    def fake_call(args, **kwargs):
+        captured.append(args)
+        output.write_text(json.dumps({"benchmarks": [{"metadata": {"name": "nbody"}}]}))
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", fake_call)
+    return captured
+
+
+def test_check_loops_table_accepts_a_table(tmp_path):
+    run_benchmarks.check_loops_table(_write_loops_table(tmp_path / "loops.json"))
+
+
+def test_check_loops_table_rejects_a_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        run_benchmarks.check_loops_table(tmp_path / "nope.json")
+
+
+def test_check_loops_table_rejects_a_results_file(tmp_path):
+    # The pre---loops-table setup symlinked loops.json to a results file. That
+    # must fail here, with an actionable message, rather than inside pyperf on
+    # the runner after the interpreter has already been built.
+    results = next(DATA_PATH.glob("results/**/*.json"))
+    target = tmp_path / "loops.json"
+    target.write_text(results.read_text())
+    with pytest.raises(ValueError, match="not a pyperf loops table"):
+        run_benchmarks.check_loops_table(target)
+
+
+def test_check_loops_table_rejects_junk(tmp_path):
+    target = tmp_path / "loops.json"
+    target.write_text("not json at all")
+    with pytest.raises(ValueError, match="not readable as JSON"):
+        run_benchmarks.check_loops_table(target)
+
+
+def test_loops_table_is_passed_to_pyperformance(tmp_path, monkeypatch):
+    """
+    The one line this feature adds to the product path: the env var becomes a
+    --loops-table argument on pyperformance's command line.
+    """
+    table = _write_loops_table(tmp_path / "loops.json")
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(table))
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert captured, "pyperformance was never invoked"
+    assert f"--loops-table={table.resolve()}" in captured[0]
+
+
+def test_loops_table_path_is_resolved_through_a_symlink(tmp_path, monkeypatch):
+    # The documented setup nominates the table with a symlink, and each
+    # benchmark runs from its own directory, so the path handed over has to be
+    # both absolute and dereferenced.
+    real = _write_loops_table(tmp_path / "real-table.json")
+    link = tmp_path / "loops.json"
+    link.symlink_to(real)
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(link))
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--loops-table={real.resolve()}" in captured[0]
+
+
+def test_no_loops_table_argument_when_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert not [a for a in captured[0] if str(a).startswith("--loops-table")]
