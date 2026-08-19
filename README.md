@@ -132,6 +132,10 @@ The table is keyed by the name each benchmark reports, so a single benchmark scr
 Add `-u` to merge further runs into an existing table, or `-f` to replace it.
 Generate one table per machine: loop counts measured on one runner do not describe another, and `synthesize_loops_file` refuses to merge results from different machines into one table.
 
+A table need not list every benchmark, and one it does not list is calibrated as usual, which puts a run-to-run varying loop count back into a run meant to be reproducible.
+Set `PYPERFORMANCE_NO_CALIBRATE` to make that an error instead: every benchmark must then be in the table, and one that is not names itself and stops the run.
+It requires `PYPERFORMANCE_LOOPS_FILE` to be set as well, and `bench_runner` says so up front rather than letting the run get as far as a worker process.
+
 > [!IMPORTANT]
 > **If you already have a `loops.json`, regenerate it.** Earlier versions of `bench_runner` passed this file to `pyperformance --same-loops`, which took a benchmark *results* file, and the documented setup was a symlink to one:
 >
@@ -155,6 +159,8 @@ The loops table spans three repositories, and they have to be updated in order:
 
 Until (1) and (2) are released and both pins here are bumped, setting `PYPERFORMANCE_LOOPS_FILE` makes `pyperformance` exit with an unrecognised-argument error before any benchmark runs.
 `bench_runner` checks the file itself and fails early with a clear message, but it cannot detect an old `pyperformance`, so leave the variable unset until the pins move.
+
+`PYPERFORMANCE_NO_CALIBRATE` depends on the same three-repository chain and on the same pins, so the same applies to it.
 
 #### Plot configuration
 

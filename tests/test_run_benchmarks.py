@@ -467,3 +467,47 @@ def test_no_loops_table_argument_when_unset(tmp_path, monkeypatch):
     run_benchmarks.run_benchmarks(sys.executable, "nbody")
 
     assert not [a for a in captured[0] if str(a).startswith("--loops-table")]
+
+
+# ---------------------------------------------------------------------------
+# --no-calibrate passthrough
+# ---------------------------------------------------------------------------
+
+
+def test_no_calibrate_is_passed_to_pyperformance(tmp_path, monkeypatch):
+    table = _write_loops_table(tmp_path / "loops.json")
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(table))
+    monkeypatch.setenv(run_benchmarks.NO_CALIBRATE_ENV_VAR, "1")
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert "--no-calibrate" in captured[0]
+    assert f"--loops-table={table.resolve()}" in captured[0]
+
+
+def test_no_calibrate_argument_absent_when_unset(tmp_path, monkeypatch):
+    table = _write_loops_table(tmp_path / "loops.json")
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(table))
+    monkeypatch.delenv(run_benchmarks.NO_CALIBRATE_ENV_VAR, raising=False)
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert "--no-calibrate" not in captured[0]
+
+
+def test_no_calibrate_without_a_loops_file_is_refused(tmp_path, monkeypatch):
+    # pyperf would refuse this too, but only from inside a worker process on
+    # the runner, naming neither variable.
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    monkeypatch.setenv(run_benchmarks.NO_CALIBRATE_ENV_VAR, "1")
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match=run_benchmarks.LOOPS_FILE_ENV_VAR):
+        run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert not captured, "pyperformance should not have been invoked"
