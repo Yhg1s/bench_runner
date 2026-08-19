@@ -1,6 +1,5 @@
 import contextlib
 import functools
-import itertools
 import os
 from pathlib import Path
 import shutil
@@ -28,19 +27,6 @@ def apply_suffix(path: PathLike, suffix: str) -> Path:
     """
     path_ = Path(path)
     return path_.parent / (path_.stem + suffix)
-
-
-def has_any_element(iterable):
-    """
-    Checks if an iterable (like a generator) has at least one element
-    without consuming the original iterable more than necessary.
-    """
-    first, iterable = itertools.tee(iterable, 2)  # Create two independent iterators
-    try:
-        next(first)  # Try to get the first element
-        return True  # If successful, the generator is not empty
-    except StopIteration:
-        return False  # If StopIteration is raised, the generator is empty
 
 
 def safe_which(cmd: str) -> str:
