@@ -328,3 +328,26 @@ def test_pystats(tmpdir):
         assert len(deltablue_output) == 2
         all_output = list((repo / "results").glob("**/*-pystats.*"))
         assert len(all_output) == 2
+
+
+# ---------------------------------------------------------------------------
+# nickname_for_machine
+# ---------------------------------------------------------------------------
+
+
+def test_nickname_for_machine_simple():
+    assert workflow.nickname_for_machine("linux-x86_64-pyperf") == "pyperf"
+
+
+def test_nickname_for_machine_with_dashes():
+    """
+    The nickname is user-controlled and the README's own examples use dashes,
+    so splitting on every dash crashed before any benchmarking started.
+    """
+    assert workflow.nickname_for_machine("linux-x86_64-linux2-gcc12") == "linux2-gcc12"
+    assert workflow.nickname_for_machine("darwin-arm64-m1-mini-2") == "m1-mini-2"
+
+
+@pytest.mark.parametrize("machine", ["all", "__really_all"])
+def test_nickname_for_machine_passes_through_the_wildcards(machine):
+    assert workflow.nickname_for_machine(machine) == machine
