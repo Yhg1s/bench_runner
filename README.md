@@ -169,6 +169,34 @@ If a benchmark fails to calibrate, the table keeps the counts that worked and th
 > [!NOTE]
 > This requires a `pyperformance` new enough to accept `--loops-table`, and a `pyperf` new enough to implement it. Both are newer than the versions currently pinned in `benchmark_definitions.py` and `pyproject.toml`, so this feature does not work until those pins are bumped — see [Loops table support](#loops-table-support).
 
+##### Per-runner loops tables
+
+Loop counts describe the machine that measured them, and `pyperf` warns when a table was generated somewhere else.
+A repo that benchmarks on more than one runner therefore wants a table per runner, not one for all of them, and the two settings above can be given per runner in `bench_runner.toml`:
+
+```toml
+[runners.linux]
+os = "linux"
+arch = "x86_64"
+hostname = "pyperf"
+loops_table_file = "loops-linux.json"
+no_calibrate = true
+
+[runners.linux_ft]
+os = "linux"
+arch = "x86_64"
+hostname = "pyperf-ft"
+# A free-threading build runs at a different speed, so it needs its own counts.
+loops_table_file = "loops-linux-ft.json"
+```
+
+A runner's setting wins over the environment variable, which stays the repo-wide default for runners that say nothing.
+`no_calibrate` is three-valued for that reason: leaving it out defers to `PYPERFORMANCE_NO_CALIBRATE`, while `no_calibrate = false` turns calibration back on for one runner whose table is still incomplete, with the variable left set everywhere else.
+
+`--generate-loops` writes to the same place, so each runner calibrates into its own table rather than into a shared default that the next runner would overwrite.
+
+These can also be set through a runner's `env` table, since they are ordinary environment variables, but the settings above are checked against the config schema -- a mistyped key is an error rather than a silently ignored one that leaves the run calibrating.
+
 ##### Loops table support
 
 The loops table spans three repositories, and they have to be updated in order:

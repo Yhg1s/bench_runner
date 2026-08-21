@@ -46,6 +46,16 @@ class Runner:
     # The number of cores to use to compile CPython. If not provided, `make -j`
     # will be used.
     use_cores: int | None = None
+    # The loops table to use on this runner, overriding
+    # PYPERFORMANCE_LOOPS_FILE. Loop counts describe the machine they were
+    # measured on, so a repo benchmarking on several runners needs one table
+    # per runner rather than one for all of them.
+    loops_table_file: str | None = None
+    # Whether this runner refuses to calibrate, overriding
+    # PYPERFORMANCE_NO_CALIBRATE. None means "not configured", which is what
+    # lets an explicit `no_calibrate = false` here turn the variable off for
+    # one runner while it stays on everywhere else.
+    no_calibrate: bool | None = None
     # The groups this runner belongs to. Not configured per-runner: filled in
     # from the [groups] sections by groups.get_groups().
     groups: set[str] = dataclasses.field(default_factory=set)

@@ -623,3 +623,145 @@ def test_generated_table_is_used_by_the_run_that_follows(tmp_path, monkeypatch):
     run_benchmarks.run_benchmarks(sys.executable, "nbody")
 
     assert f"--loops-table={written}" in captured[0]
+
+
+# ---------------------------------------------------------------------------
+# per-runner loops table configuration
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def runner_config(tmp_path, monkeypatch):
+    """
+    Make the current runner one configured by the test.
+
+    get_config() caches on the relative path "bench_runner.toml", so a config
+    another test loaded from its own directory would otherwise be handed back
+    here instead of this one. Cleared on the way in and on the way out, so this
+    test's config does not escape either.
+    """
+    from bench_runner import config as mconfig
+
+    def configure(**runner_fields):
+        lines = [
+            "[bases]",
+            'versions = ["3.12.0"]',
+            "",
+            "[runners.testrunner]",
+            'os = "linux"',
+            'arch = "x86_64"',
+            'hostname = "testhost"',
+        ]
+        lines += [
+            f"{key} = {json.dumps(value)}"
+            for key, value in runner_fields.items()
+        ]
+        (tmp_path / "bench_runner.toml").write_text("\n".join(lines) + "\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("BENCHMARK_MACHINE_NICKNAME", "testrunner")
+        mconfig._load_config.cache_clear()
+
+    mconfig._load_config.cache_clear()
+    yield configure
+    mconfig._load_config.cache_clear()
+
+
+def test_runner_loops_table_file_beats_the_env_var(
+    tmp_path, monkeypatch, runner_config
+):
+    # The point of the feature: one repo, several runners, and a loops table
+    # describes the machine that measured it.
+    table = _write_loops_table(tmp_path / "runner-table.json")
+    _write_loops_table(tmp_path / "global-table.json")
+    monkeypatch.setenv(
+        run_benchmarks.LOOPS_FILE_ENV_VAR, str(tmp_path / "global-table.json")
+    )
+    runner_config(loops_table_file=str(table))
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--loops-table={table.resolve()}" in captured[0]
+
+
+def test_runner_loops_table_file_used_with_no_env_var(
+    tmp_path, monkeypatch, runner_config
+):
+    table = _write_loops_table(tmp_path / "runner-table.json")
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    runner_config(loops_table_file=str(table))
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--loops-table={table.resolve()}" in captured[0]
+
+
+def test_env_var_still_used_when_the_runner_says_nothing(
+    tmp_path, monkeypatch, runner_config
+):
+    table = _write_loops_table(tmp_path / "global-table.json")
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(table))
+    runner_config()
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--loops-table={table.resolve()}" in captured[0]
+
+
+def test_runner_no_calibrate_is_passed(tmp_path, monkeypatch, runner_config):
+    table = _write_loops_table(tmp_path / "runner-table.json")
+    monkeypatch.delenv(run_benchmarks.NO_CALIBRATE_ENV_VAR, raising=False)
+    runner_config(loops_table_file=str(table), no_calibrate=True)
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert "--no-calibrate" in captured[0]
+
+
+def test_runner_no_calibrate_false_overrides_the_env_var(
+    tmp_path, monkeypatch, runner_config
+):
+    # The reason no_calibrate is tri-state. One runner whose table is
+    # incomplete opts out while the variable stays set for the rest.
+    table = _write_loops_table(tmp_path / "runner-table.json")
+    monkeypatch.setenv(run_benchmarks.NO_CALIBRATE_ENV_VAR, "1")
+    runner_config(loops_table_file=str(table), no_calibrate=False)
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert "--no-calibrate" not in captured[0]
+
+
+def test_settings_fall_back_to_the_env_without_a_config_file(tmp_path, monkeypatch):
+    # run_benchmarks is usable in a checkout with no bench_runner.toml, and
+    # consulting the runner must not turn that into an error.
+    from bench_runner import config as mconfig
+
+    mconfig._load_config.cache_clear()
+    monkeypatch.chdir(tmp_path)
+    assert not (tmp_path / "bench_runner.toml").exists()
+    table = _write_loops_table(tmp_path / "loops.json")
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(table))
+
+    try:
+        assert run_benchmarks.get_loops_file() == str(table)
+        assert run_benchmarks.get_no_calibrate() is False
+    finally:
+        mconfig._load_config.cache_clear()
+
+
+def test_generation_targets_the_runners_own_table(tmp_path, monkeypatch, runner_config):
+    # Otherwise every runner would calibrate into the same default file and
+    # the last one to run would win.
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    runner_config(loops_table_file="runner-table.json")
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    written = run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    assert written == (tmp_path / "runner-table.json").resolve()
+    assert str(written) in [str(a) for a in captured[0]]
