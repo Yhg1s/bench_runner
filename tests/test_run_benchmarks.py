@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -511,3 +512,114 @@ def test_no_calibrate_without_a_loops_file_is_refused(tmp_path, monkeypatch):
         run_benchmarks.run_benchmarks(sys.executable, "nbody")
 
     assert not captured, "pyperformance should not have been invoked"
+
+
+# ---------------------------------------------------------------------------
+# loops table generation
+# ---------------------------------------------------------------------------
+
+
+def _stub_calibration(tmp_path, monkeypatch, loops=None, returncode=0):
+    """
+    Capture the pyperformance command line and write the table it would write.
+    """
+    captured = []
+
+    def fake_call(args, **kwargs):
+        captured.append(args)
+        if loops is not None:
+            _write_loops_table(Path(args[args.index("-o") + 1]), loops)
+        return returncode
+
+    monkeypatch.setattr(subprocess, "call", fake_call)
+    return captured
+
+
+def test_generate_loops_table_calls_the_pyperformance_command(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(tmp_path / "loops.json"))
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    args = [str(a) for a in captured[0]]
+    assert "loops_table" in args
+    assert "--benchmarks" in args and args[args.index("--benchmarks") + 1] == "nbody"
+    # The interpreter being benchmarked, not the one running bench_runner: a
+    # count calibrated against a different build is the wrong count.
+    assert args[args.index("--python") + 1] == sys.executable
+
+
+def test_generate_loops_table_points_the_run_at_what_it_wrote(tmp_path, monkeypatch):
+    # Without this the table would be calibrated and then ignored, which looks
+    # exactly like the feature working.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    written = run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    assert written == (tmp_path / run_benchmarks.DEFAULT_LOOPS_FILE).resolve()
+    assert os.environ[run_benchmarks.LOOPS_FILE_ENV_VAR] == str(written)
+
+
+def test_generate_loops_table_writes_an_absolute_path(tmp_path, monkeypatch):
+    # pyperformance runs each benchmark from its own directory, so a relative
+    # -o would not land where the run later looks for it.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, "loops.json")
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    args = [str(a) for a in captured[0]]
+    assert Path(args[args.index("-o") + 1]).is_absolute()
+
+
+def test_generate_loops_table_calibrates_under_the_run_affinity(tmp_path, monkeypatch):
+    # How many loops fit in --min-time depends on which CPU runs them.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    monkeypatch.setenv("CPU_AFFINITY", "2-5")
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    assert "--affinity=2-5" in [str(a) for a in captured[0]]
+
+
+def test_generate_loops_table_keeps_a_partial_table(tmp_path, monkeypatch):
+    # pyperformance exits nonzero when any one benchmark fails to calibrate and
+    # still writes the rest. One benchmark that will not install its
+    # requirements should not cost the other hundred their counts.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64}, returncode=1)
+
+    written = run_benchmarks.generate_loops_table(sys.executable, "nbody,broken")
+
+    assert json.loads(written.read_text())["loops"] == {"nbody": 64}
+
+
+def test_generate_loops_table_refuses_an_unusable_table(tmp_path, monkeypatch):
+    # Nothing written at all is not a partial result, it is a broken run, and
+    # saying so here beats failing inside pyperf on the runner later.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    _stub_calibration(tmp_path, monkeypatch, loops=None, returncode=1)
+
+    with pytest.raises(FileNotFoundError):
+        run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+
+def test_generated_table_is_used_by_the_run_that_follows(tmp_path, monkeypatch):
+    # The whole point: generation and consumption have to meet on the same path.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+    written = run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--loops-table={written}" in captured[0]

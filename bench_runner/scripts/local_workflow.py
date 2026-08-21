@@ -60,6 +60,12 @@ def main():
         help="Do a 32-bit build (Windows only)",
     )
     parser.add_argument(
+        "--generate-loops",
+        action="store_true",
+        help="Calibrate the benchmarks first and hold the loop counts fixed "
+        "for this run, instead of calibrating again inside it",
+    )
+    parser.add_argument(
         "--_fast", action="store_true", help="Use fast mode, for testing"
     )
     args = parser.parse_args()
@@ -76,4 +82,8 @@ def main():
         args.pystats,
         args.force_32bit,
         args._fast,
+        # By keyword: the positional arguments here already line up one short
+        # of workflow._main()'s, so _fast lands in run_id. Passing this one by
+        # name keeps it out of that.
+        generate_loops=args.generate_loops,
     )
