@@ -136,6 +136,26 @@ A table need not list every benchmark, and one it does not list is calibrated as
 Set `PYPERFORMANCE_NO_CALIBRATE` to make that an error instead: every benchmark must then be in the table, and one that is not names itself and stops the run.
 It requires `PYPERFORMANCE_LOOPS_FILE` to be set as well, and `bench_runner` says so up front rather than letting the run get as far as a worker process.
 
+##### Calibrating a table as part of a run
+
+`synthesize_loops_file` reuses counts recorded in an earlier results file, so it needs a run to have happened already, and the counts describe whatever machine and interpreter produced it.
+The alternative is to calibrate a fresh table at the start of a run, with `--generate-loops`:
+
+```sh
+python -m bench_runner local_workflow --generate-loops <fork> <ref> <machine> <benchmarks> <flags>
+```
+
+This works the same way on `workflow` and on `run_benchmarks`.
+It calibrates the benchmarks that are about to run, on the machine that is about to run them, with the interpreter that was just built, and then holds those counts fixed for the run that follows.
+That costs a calibration pass, and it buys a table with no question over whether it still applies.
+
+The table is written to `PYPERFORMANCE_LOOPS_FILE`, or to `loops.json` if that is unset, and the variable is then pointed at it so the run picks it up.
+Calibration uses the same `CPU_AFFINITY` as the run, since how many loops fit in the target time depends on which CPU runs them.
+
+The counts still vary run to run -- calibration is itself a measurement -- so this makes a *single* run internally consistent rather than making two runs comparable.
+To compare runs, generate one table and reuse it, with either command.
+If a benchmark fails to calibrate, the table keeps the counts that worked and the run goes ahead; combine with `PYPERFORMANCE_NO_CALIBRATE` to refuse to run in that case.
+
 > [!IMPORTANT]
 > **If you already have a `loops.json`, regenerate it.** Earlier versions of `bench_runner` passed this file to `pyperformance --same-loops`, which took a benchmark *results* file, and the documented setup was a symlink to one:
 >
@@ -161,6 +181,10 @@ Until (1) and (2) are released and both pins here are bumped, setting `PYPERFORM
 `bench_runner` checks the file itself and fails early with a clear message, but it cannot detect an old `pyperformance`, so leave the variable unset until the pins move.
 
 `PYPERFORMANCE_NO_CALIBRATE` depends on the same three-repository chain and on the same pins, so the same applies to it.
+
+`--generate-loops` needs one thing more: a `pyperformance` with a `loops_table` subcommand, which is newer still than the one that merely accepts `--loops-table`.
+It is a separate step in the same chain, so a pin that is new enough for `PYPERFORMANCE_LOOPS_FILE` is not necessarily new enough for this.
+Passing `--generate-loops` to an older `pyperformance` fails with an invalid-choice error from its argument parser, before anything is built.
 
 #### Plot configuration
 

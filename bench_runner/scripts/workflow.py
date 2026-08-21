@@ -294,6 +294,7 @@ def _main(
     force_32bit: bool,
     run_id: str | None = None,
     fast: bool = False,
+    generate_loops: bool = False,
 ):
     nickname = nickname_for_machine(machine)
 
@@ -368,6 +369,7 @@ def _main(
                 run_id=run_id,
                 test_mode=fast,
                 individual=pystats,
+                generate_loops=generate_loops,
             )
     finally:
         if not fast:
@@ -411,6 +413,12 @@ def main():
         dest="force_32bit",
         help="Do a 32-bit build (Windows only)",
     )
+    parser.add_argument(
+        "--generate-loops",
+        action="store_true",
+        help="Calibrate the benchmarks first and hold the loop counts fixed "
+        "for this run, instead of calibrating again inside it",
+    )
     parser.add_argument("--run_id", default=None, type=str, help="The github run id")
     parser.add_argument(
         "--_fast", action="store_true", help="Use fast mode, for testing"
@@ -430,6 +438,7 @@ def main():
         args.force_32bit,
         args.run_id,
         args._fast,
+        generate_loops=args.generate_loops,
     )
 
 

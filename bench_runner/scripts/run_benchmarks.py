@@ -37,6 +37,10 @@ GITHUB_URL = "https://github.com/" + os.environ.get(
 ENV_VARS = ["PYTHON_JIT", "PYPERF_PERF_RECORD_EXTRA_OPTS"]
 LOOPS_FILE_ENV_VAR = "PYPERFORMANCE_LOOPS_FILE"
 NO_CALIBRATE_ENV_VAR = "PYPERFORMANCE_NO_CALIBRATE"
+# Where a loops table lives when nothing says otherwise. This is the name the
+# README tells people to use, and what the variable defaulted to before it
+# existed.
+DEFAULT_LOOPS_FILE = "loops.json"
 
 
 class NoBenchmarkError(Exception):
@@ -97,6 +101,74 @@ def get_benchmark_names(benchmarks: str) -> list[str]:
     )
 
     return [line[2:].strip() for line in output.splitlines() if line.startswith("- ")]
+
+
+def generate_loops_table(python: PathLike, benchmarks: str, /) -> Path:
+    """
+    Calibrate the selected benchmarks and write a loops table.
+
+    Returns the path written, and points LOOPS_FILE_ENV_VAR at it so the run
+    that follows uses it.
+
+    This is the other way to get a table than `synthesize_loops_file`, which
+    reuses counts recorded in an earlier results file. Calibrating here costs a
+    pass over the benchmarks, but the counts come from this machine and the
+    interpreter that was just built, so there is no question of whether they
+    still apply.
+    """
+    if benchmarks.strip() == "":
+        benchmarks = "all"
+
+    # Resolved for the reason run_benchmarks() resolves it: pyperformance runs
+    # each benchmark from its own directory, so a relative path would not mean
+    # the same thing by the time it is used.
+    loops_path = Path(os.environ.get(LOOPS_FILE_ENV_VAR, DEFAULT_LOOPS_FILE)).resolve()
+
+    extra_args = []
+    if affinity := os.environ.get("CPU_AFFINITY"):
+        # How many loops fit in --min-time depends on which CPU runs them, so
+        # calibrate under the affinity the benchmarks will be run with.
+        extra_args.append(f"--affinity={affinity}")
+
+    args = [
+        sys.executable,
+        "-m",
+        "pyperformance",
+        "loops_table",
+        "-o",
+        loops_path,
+        "--manifest",
+        "benchmarks.manifest",
+        "--benchmarks",
+        benchmarks,
+        "--python",
+        python,
+        "--inherit-environ",
+        ",".join(ENV_VARS),
+        *extra_args,
+    ]
+
+    print(f"RUNNING: {' '.join(str(x) for x in args)}")
+
+    # Not check_call: pyperformance exits nonzero when any single benchmark
+    # fails to calibrate, and still writes the counts that worked. That is the
+    # same tolerance run_benchmarks() extends to the benchmark run itself, and
+    # for the same reason -- one benchmark that will not build its requirements
+    # should not stop the other hundred. An unusable table is caught below.
+    subprocess.call(args)
+
+    check_loops_table(loops_path)
+
+    with loops_path.open() as fd:
+        count = len(json.load(fd).get("loops", {}))
+    print(f"Calibrated {count} benchmark functions into {loops_path}")
+
+    # A benchmark missing from the table is calibrated as usual by the run that
+    # follows, unless NO_CALIBRATE_ENV_VAR is set, in which case that run stops
+    # and names it. Either way the table is worth using, so point at it.
+    os.environ[LOOPS_FILE_ENV_VAR] = str(loops_path)
+
+    return loops_path
 
 
 def run_benchmarks(
@@ -197,7 +269,7 @@ def collect_pystats(
     # Default to loops.json if not explicitly set, like before the
     # environment variable was added.
     if LOOPS_FILE_ENV_VAR not in os.environ:
-        os.environ[LOOPS_FILE_ENV_VAR] = "loops.json"
+        os.environ[LOOPS_FILE_ENV_VAR] = DEFAULT_LOOPS_FILE
 
     extra_args = ["--hook", "pystats", "--warmups", "0"]
 
@@ -453,8 +525,16 @@ def _main(
     run_id: str | None,
     individual: bool,
     flags: Iterable[str],
+    generate_loops: bool = False,
 ) -> None:
     benchmarks = select_benchmarks(benchmarks)
+
+    # Before the mode dispatch, and after select_benchmarks(), so the table is
+    # calibrated for exactly the benchmarks that are about to run: a table is
+    # looked up per benchmark function, so covering the wrong set is the one
+    # way to get a table that silently does nothing.
+    if generate_loops:
+        generate_loops_table(python, benchmarks)
 
     if mode == "benchmark":
         run_benchmarks(python, benchmarks, test_mode=test_mode)
@@ -498,6 +578,12 @@ def main():
         action="store_true",
         help="For pystats mode, collect stats for each individual benchmark",
     )
+    parser.add_argument(
+        "--generate-loops",
+        action="store_true",
+        help="Calibrate the selected benchmarks first and write a loops table, "
+        f"then use it for this run (see {LOOPS_FILE_ENV_VAR})",
+    )
     args = parser.parse_args()
 
     if args.test_mode:
@@ -523,6 +609,7 @@ def main():
         args.run_id,
         args.individual,
         flags.parse_flags(args.flags),
+        args.generate_loops,
     )
 
 
