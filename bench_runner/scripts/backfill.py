@@ -21,6 +21,7 @@ from bench_runner import config
 from bench_runner import flags as mflags
 from bench_runner import gh
 from bench_runner import git
+from bench_runner import groups
 from bench_runner import result as mod_result
 from bench_runner import runners
 from bench_runner.util import PathLike
@@ -300,7 +301,7 @@ def _main(
 def main():
     cfg = config.get_config()
     all_runners = [x for x in cfg.runners.values() if x.available]
-    runners_by_names = {x.nickname: x for x in all_runners}
+    runner_names = [x.nickname for x in all_runners]
 
     parser = argparse.ArgumentParser(
         description="""
@@ -334,7 +335,7 @@ def main():
     )
     parser.add_argument(
         "--machine",
-        choices=[*runners_by_names.keys(), "all"],
+        choices=[*groups.get_groups().keys(), *runner_names, "all"],
         default=all_runners[0].nickname,
         help="The machine to run on.",
     )
@@ -355,7 +356,7 @@ def main():
     args = parser.parse_args()
 
     if args.machine != "all":
-        use_runners = [runners_by_names[args.machine]]
+        use_runners = runners.get_runners_from_nicknames_and_groups([args.machine])
     else:
         use_runners = all_runners
 

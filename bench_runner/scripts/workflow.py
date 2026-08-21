@@ -76,7 +76,7 @@ def should_run(
     force: bool,
     fork: str,
     ref: str,
-    machine: str,
+    nickname: str,
     pystats: bool,
     flags: list[str],
     cpython: Path = Path("cpython"),
@@ -97,11 +97,12 @@ def should_run(
     found_result = has_result(
         results_dir,
         commit_hash,
-        machine,
+        nickname,
         pystats,
         flags,
         benchmark_definitions.get_benchmark_hash(),
         progress=False,
+        pattern=f"*{nickname}*{commit_hash[:7]}*",
     )
 
     if force:
@@ -111,7 +112,7 @@ def should_run(
                     git.remove(results_dir.parent, filepath)
         should_run = True
     else:
-        should_run = (machine in ("__really_all", "all")) or found_result is None
+        should_run = (nickname in ("__really_all", "all")) or found_result is None
 
     return should_run
 
@@ -138,7 +139,7 @@ def compile_unix(
     reconfigure: bool = True,
 ) -> None:
     cpython = Path(cpython)
-    runner = runners.get_runner_for_hostname()
+    runner = runners.get_current_runner()
 
     env = os.environ.copy()
 
@@ -174,6 +175,10 @@ def compile_unix(
     with contextlib.chdir(cpython):
         if reconfigure:
             subprocess.check_call(["./configure", *args], env=env)
+            # Configuring again leaves the old PGO results in place, which the
+            # new build must not pick up. Only on a reconfigure: the callers
+            # that skip it are after an incremental build.
+            subprocess.check_call(["make", *make_args, "clean"], env=env)
         subprocess.check_call(["make", *make_args], env=env)
 
 
@@ -228,7 +233,11 @@ def tune_system(venv: PathLike, perf: bool) -> None:
     if cpu_affinity := os.environ.get("CPU_AFFINITY"):
         args.append(f"--affinity={cpu_affinity}")
 
-    run_in_venv(venv, "pyperf", args, sudo=True)
+    try:
+        run_in_venv(venv, "pyperf", args, sudo=True)
+    except subprocess.CalledProcessError:
+        # pyperf can fail to set IRQs, which is not a problem.
+        pass
 
     if perf:
         subprocess.check_call(
@@ -246,12 +255,16 @@ def reset_system(venv: PathLike) -> None:
     if util.get_simple_platform() != "linux":
         return
 
-    run_in_venv(
-        venv,
-        "pyperf",
-        ["system", "reset"],
-        sudo=True,
-    )
+    try:
+        run_in_venv(
+            venv,
+            "pyperf",
+            ["system", "reset"],
+            sudo=True,
+        )
+    except subprocess.CalledProcessError:
+        # pyperf can fail to reset IRQs, which is not a problem.
+        pass
 
 
 def _main(
@@ -268,6 +281,10 @@ def _main(
     run_id: str | None = None,
     fast: bool = False,
 ):
+    nickname = machine
+    if nickname not in ("all", "__really_all"):
+        _, _, nickname = machine.split("-")
+
     venv = Path("venv")
     cpython = Path("cpython")
     platform = util.get_simple_platform()
@@ -284,7 +301,7 @@ def _main(
 
     with log_group("Determining if we need to run benchmarks"):
         if not fast and not should_run(
-            force, fork, ref, machine, False, flags, cpython=cpython
+            force, fork, ref, nickname, False, flags, cpython=cpython
         ):
             print("No need to run benchmarks.  Skipping...")
             return

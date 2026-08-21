@@ -62,9 +62,20 @@ class Weekly:
 
 
 @dataclasses.dataclass
+class Group:
+    # The runners in this group. May name other groups, which are expanded.
+    runners: list[str] = dataclasses.field(default_factory=list)
+    # The name to show for this group where it is presented as a choice
+    displayname: str = ""
+    # Whether to present this group collapsed
+    collapsed: bool = False
+
+
+@dataclasses.dataclass
 class Config:
     bases: Bases
     runners: dict[str, mrunners.Runner]
+    groups: dict[str, Group] = dataclasses.field(default_factory=dict)
     publish_mirror: PublishMirror = dataclasses.field(default_factory=PublishMirror)
     benchmarks: Benchmarks = dataclasses.field(default_factory=Benchmarks)
     notify: Notify = dataclasses.field(default_factory=Notify)
@@ -85,6 +96,10 @@ class Config:
                 nickname=name, **runner  # pyright: ignore[reportCallIssue]
             )
             for name, runner in self.runners.items()
+        }
+        self.groups = {
+            name: Group(**group) if isinstance(group, dict) else group
+            for name, group in self.groups.items()
         }
         if isinstance(self.publish_mirror, dict):
             self.publish_mirror = PublishMirror(**self.publish_mirror)
@@ -112,13 +127,19 @@ class Config:
 
 
 @functools.cache
-def get_config(filepath: PathLike | None = None) -> Config:
-    if filepath is None:
-        filepath = Path("bench_runner.toml")
-    else:
-        filepath = Path(filepath)
-
+def _load_config(filepath: Path) -> Config:
     with filepath.open("rb") as fd:
         content = tomllib.load(fd)
 
     return Config(**content)
+
+
+def get_config(filepath: PathLike | None = None) -> Config:
+    # Resolve the path before the cache, not inside it: get_config(),
+    # get_config(None) and get_config("bench_runner.toml") all name the same
+    # file, but are three distinct keys to functools.cache, and so would build
+    # three Configs. A Runner remembers which groups it is in, so more than one
+    # Config per file means callers disagreeing about a runner's groups.
+    if filepath is None:
+        filepath = Path("bench_runner.toml")
+    return _load_config(Path(filepath))

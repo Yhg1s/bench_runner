@@ -73,7 +73,9 @@ jobs:
           git gc
       - name: Building Python and running pyperformance
         run: |
-          py workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} ${{ inputs.machine }} ${{ inputs.benchmarks || 'all' }} "${{ env.flags }}" ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} --run_id ${{ github.run_id }}
+          py workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} `
+              ${{ (inputs.machine == 'all' || inputs.machine == '__really_all') && inputs.machine || '$env:BENCHMARK_RUNNER_NAME' }} `
+              ${{ inputs.benchmarks || 'all' }} "${{ env.flags }}" ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} --run_id ${{ github.run_id }}
       # Pull again, since another job may have committed results in the meantime
       - name: Pull benchmarking
         run: |
@@ -105,14 +107,11 @@ jobs:
         run: |
           git gc
       - uses: fregante/setup-git-user@024bc0b8e177d7e77203b48dab6fb45666854b35 # v2.0.2
-      - name: Setup system Python
-        if: ${{ runner.arch == 'X64' }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.11"
       - name: Building Python and running pyperformance
         run: |
-          python workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} ${{ inputs.machine }} ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} ${{ inputs.perf && '--perf' || '' }} --run_id ${{ github.run_id }}
+          setarch -R python workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} \
+              ${{ (inputs.machine == 'all' || inputs.machine == '__really_all') && inputs.machine || '"$BENCHMARK_RUNNER_NAME"' }} \
+              ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} ${{ inputs.perf && '--perf' || '' }} --run_id ${{ github.run_id }}
       # Pull again, since another job may have committed results in the meantime
       - name: Pull benchmarking
         if: ${{ !inputs.perf }}
@@ -154,7 +153,9 @@ jobs:
           git gc
       - name: Building Python and running pyperformance
         run: |
-          python3 workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} ${{ inputs.machine }} ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} --run_id ${{ github.run_id }}
+          python3 workflow_bootstrap.py ${{ inputs.fork }} ${{ inputs.ref }} \
+              ${{ (inputs.machine == 'all' || inputs.machine == '__really_all') && inputs.machine || '"$BENCHMARK_RUNNER_NAME"' }} \
+              ${{ inputs.benchmarks || 'all' }} ${{ env.flags }} ${{ inputs.force && '--force' || '' }} ${{ inputs.pgo && '--pgo' || '' }} --run_id ${{ github.run_id }}
       # Pull again, since another job may have committed results in the meantime
       - name: Pull benchmarking
         run: |

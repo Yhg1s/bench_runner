@@ -46,6 +46,9 @@ class Runner:
     # The number of cores to use to compile CPython. If not provided, `make -j`
     # will be used.
     use_cores: int | None = None
+    # The groups this runner belongs to. Not configured per-runner: filled in
+    # from the [groups] sections by groups.get_groups().
+    groups: set[str] = dataclasses.field(default_factory=set)
 
     def __post_init__(self):
         if self.github_runner_name is None:
@@ -73,6 +76,19 @@ def get_runners_by_hostname(cfgpath: PathLike | None = None) -> dict[str, Runner
     return {x.hostname: x for x in config.get_config(cfgpath).runners.values()}
 
 
+def get_runners_by_nickname(cfgpath: PathLike | None = None) -> dict[str, Runner]:
+    from . import config
+    from . import groups as mgroups
+
+    runners = config.get_config(cfgpath).runners
+    # Groups are resolved to nicknames, so this is where a runner learns which
+    # groups it is in. Doing it here, against the one config cached for
+    # cfgpath, keeps every caller looking at the same Runner objects.
+    for group in mgroups.get_groups(cfgpath).values():
+        group.update_runners(runners)
+    return runners
+
+
 def get_nickname_for_hostname(
     hostname: str | None = None, cfgpath: PathLike | None = None
 ) -> str:
@@ -95,3 +111,36 @@ def get_runner_for_hostname(
     if hostname is None:
         hostname = socket.gethostname()
     return get_runners_by_hostname(cfgpath).get(hostname, unknown_runner)
+
+
+def get_current_runner(cfgpath: PathLike | None = None) -> Runner:
+    """
+    The runner this process is running as.
+
+    One machine can host more than one runner, in which case the hostname does
+    not say which one this is, so an explicitly set nickname wins over it.
+    """
+    if nickname := os.environ.get("BENCHMARK_MACHINE_NICKNAME"):
+        return get_runner_by_nickname(nickname, cfgpath)
+    return get_runner_for_hostname(cfgpath=cfgpath)
+
+
+def get_runners_from_nicknames_and_groups(
+    nicknames: list[str], cfgpath: PathLike | None = None
+) -> list[Runner]:
+    from . import groups as mgroups
+
+    groups = mgroups.get_groups(cfgpath)
+    runners = get_runners_by_nickname(cfgpath)
+    # Keyed by nickname rather than a set of runners: Runner is a dataclass,
+    # so it is unhashable.
+    result: dict[str, Runner] = {}
+    for nickname in nicknames:
+        if nickname in groups:
+            for n in groups[nickname].runners:
+                result[n] = runners[n]
+        else:
+            if nickname not in runners:
+                raise ValueError(f"Runner {nickname} not found in bench_runner.toml")
+            result[nickname] = runners[nickname]
+    return sorted(result.values(), key=lambda r: r.nickname)

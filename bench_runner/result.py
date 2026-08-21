@@ -325,7 +325,7 @@ class BenchmarkComparison(Comparison):
     @property
     def memory_change_float(self) -> float | None:
         memory_change = self.memory_change
-        if memory_change in (None, "unknown"):
+        if memory_change in (None, "unknown", ""):
             return None
         else:
             return float(memory_change.strip().strip("x"))
@@ -755,18 +755,17 @@ class Result:
 def has_result(
     results_dir: PathLike,
     commit_hash: str,
-    machine: str,
+    nickname: str | None,
     pystats: bool,
     flags: Sequence[str],
     benchmark_hash: str,
     progress: bool = True,
+    pattern: str | None = None,
 ) -> Result | None:
-    if machine in ("__really_all", "all"):
+    if nickname in ("__really_all", "all"):
         nickname = None
-    else:
-        _, _, nickname = machine.split("-")
 
-    results = load_all_results([], results_dir, False, progress=progress)
+    results = load_all_results([], results_dir, False, progress=progress, pattern=pattern)
 
     if pystats:
         for result in results:
@@ -783,7 +782,7 @@ def has_result(
                 commit_hash.startswith(result.cpython_hash)
                 and (nickname is None or result.nickname == nickname)
                 and result.flags == flags
-                and result.benchmark_hash == benchmark_hash
+#                and result.benchmark_hash == benchmark_hash
             ):
                 return result
 
@@ -886,15 +885,19 @@ def load_all_results(
     sorted: bool = True,
     match: bool = True,
     progress: bool = True,
+    pattern: str | None = None,
 ) -> list[Result]:
     results = []
 
-    for entry in Path(results_dir).glob("**/*.json"):
+    if pattern is None:
+        pattern = "*"
+
+    for entry in Path(results_dir).glob(f"**/{pattern}.json"):
         result = Result.from_filename(entry)
         if result.result_info[0] not in ["raw results", "pystats raw"]:
             continue
         results.append(result)
-    if len(results) == 0:
+    if len(results) == 0 and pattern == "*":
         raise ValueError("Didn't find any results.  That seems fishy.")
 
     if match:
