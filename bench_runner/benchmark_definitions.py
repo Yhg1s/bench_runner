@@ -18,7 +18,7 @@ class BenchmarkRepo:
 
 BENCHMARK_REPOS = [
     BenchmarkRepo(
-        "0061492dd42b925c3289ef52bc03eae42ccab312",
+        "29575e852273c926a618e02be10423b06ff1bb34",
         "https://github.com/Yhg1s/pyperformance.git",
         "pyperformance",
     ),
