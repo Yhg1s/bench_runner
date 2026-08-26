@@ -6,13 +6,41 @@
 # the error message that the version of Python is too old.
 
 
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 
 
+# Set this to reuse an existing venv instead of building a fresh one each run.
+# Off by default: a run that starts from nothing is the one whose results are
+# easiest to trust, and that is what a benchmarking machine wants. It is worth
+# turning on while iterating locally, where rebuilding the venv (and, unless
+# pyperformance is told otherwise with --venvs-dir, every benchmark venv nested
+# inside it) dominates the time a short run takes.
+REUSE_VENV_ENV_VAR = "BENCH_RUNNER_REUSE_VENV"
+
+
+def get_reuse_venv() -> bool:
+    return os.environ.get(REUSE_VENV_ENV_VAR, "") not in ("", "0", "false")
+
+
+def venv_python(venv: Path) -> Path:
+    if sys.platform.startswith("win"):
+        return venv / "Scripts" / "python.exe"
+    return venv / "bin" / "python"
+
+
 def create_venv(venv: Path) -> None:
+    if get_reuse_venv() and venv_python(venv).exists():
+        # Left exactly as it is, rather than rebuilt in place: the point is to
+        # keep whatever is already installed here, which includes any benchmark
+        # venvs underneath it. install_requirements() still runs, so
+        # bench_runner itself is brought up to date either way.
+        print(f"Reusing the existing venv at {venv} ({REUSE_VENV_ENV_VAR} is set)")
+        return
+
     if venv.exists():
         shutil.rmtree(venv)
 
@@ -29,16 +57,9 @@ def create_venv(venv: Path) -> None:
 def run_in_venv(
     venv: Path, module: str, cmd: list[str], prefix: list[str] = []
 ) -> None:
-    venv = Path(venv)
-
-    if sys.platform.startswith("win"):
-        exe = Path("Scripts") / "python.exe"
-    else:
-        exe = Path("bin") / "python"
-
     args = [
         *prefix,
-        str(venv / exe),
+        str(venv_python(Path(venv))),
         "-m",
         module,
         *cmd,
