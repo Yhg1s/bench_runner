@@ -19,9 +19,11 @@ import rich_argparse
 
 
 from bench_runner import benchmark_definitions
+from bench_runner import cache as mcache
 from bench_runner import config
 from bench_runner import flags
 from bench_runner import git
+from bench_runner import local_deps as mlocal_deps
 from bench_runner.result import Result
 from bench_runner.table import md_link
 from bench_runner.util import PathLike
@@ -33,8 +35,20 @@ PROFILING_RESULTS = REPO_ROOT / "profiling" / "results"
 GITHUB_URL = "https://github.com/" + os.environ.get(
     "GITHUB_REPOSITORY", "faster-cpython/bench_runner"
 )
-# Environment variables that control the execution of CPython
-ENV_VARS = ["PYTHON_JIT", "PYPERF_PERF_RECORD_EXTRA_OPTS"]
+# Environment variables that control the execution of CPython, plus the ones
+# that point pip at the cross-run package cache.
+#
+# This list becomes pyperformance's --inherit-environ, and that is the only way
+# any of it reaches the benchmark venvs: pyperformance builds them itself and
+# passes pip an allowlisted environment (venv.py:_get_envvars), so a variable
+# not named here is simply dropped. The pip names come from cache.PIP_ENV_VARS
+# rather than being spelled out again, so the allowlist cannot drift from what
+# cache.pip_env() actually sets.
+ENV_VARS = [
+    "PYTHON_JIT",
+    "PYPERF_PERF_RECORD_EXTRA_OPTS",
+    *mcache.PIP_ENV_VARS,
+]
 LOOPS_FILE_ENV_VAR = "PYPERFORMANCE_LOOPS_FILE"
 NO_CALIBRATE_ENV_VAR = "PYPERFORMANCE_NO_CALIBRATE"
 # Where a loops table lives when nothing says otherwise. This is the name the
@@ -127,10 +141,50 @@ def check_loops_table(loops_path: Path) -> None:
         )
 
 
+def get_local_dep_args() -> list[str]:
+    """
+    The `--local-dep` arguments naming every configured local checkout.
+
+    Empty on a normal run. These tell pyperformance to install those
+    distributions into each benchmark venv from a working tree instead of
+    resolving them from the pinned requirements, which is the only way a change
+    to pyperf reaches the venvs that actually run the benchmarks.
+    """
+    return [
+        f"--local-dep={dep.to_spec()}"
+        for _, dep in sorted(mlocal_deps.get_local_deps().items())
+    ]
+
+
+def get_venvs_dir_args() -> list[str]:
+    """
+    The `--venvs-dir` argument keeping the benchmark venvs out of ./venv.
+
+    pyperformance's default puts them at ./venv/<runid>, nested inside the
+    outer venv, so the bootstrap rebuilding that venv destroys every benchmark
+    venv with it and each run starts from nothing. Pointing them at the cache
+    root fixes that for good rather than only for runs that opt in with
+    BENCH_RUNNER_REUSE_VENV.
+
+    Empty when caching is turned off, which leaves pyperformance's own default
+    in place and restores the previous behaviour exactly.
+    """
+    settings = mcache.get_settings()
+    if not settings.enabled:
+        return []
+    return [f"--venvs-dir={mcache.benchmark_venvs_dir(settings.root)}"]
+
+
 def get_benchmark_names(benchmarks: str) -> list[str]:
     if benchmarks.strip() == "":
         benchmarks = "all"
 
+    # No --local-dep or --venvs-dir here, deliberately: `pyperformance list`
+    # builds no venv, so there is nothing for either flag to affect, and it
+    # accepts neither. This also runs without --python, i.e. under the outer
+    # venv's pyperformance, which install_pyperformance() has already pointed
+    # at the local checkout when there is one -- so local benchmark definitions
+    # are in effect here regardless.
     output = subprocess.check_output(
         [
             sys.executable,
@@ -178,6 +232,12 @@ def generate_loops_table(python: PathLike, benchmarks: str, /) -> Path:
         # How many loops fit in --min-time depends on which CPU runs them, so
         # calibrate under the affinity the benchmarks will be run with.
         extra_args.append(f"--affinity={affinity}")
+    # Calibration builds the same benchmark venvs the run does, so it needs the
+    # same local checkouts -- a loop count measured against a different pyperf
+    # is not the count the run wants -- and it must build them in the same place,
+    # or the run that follows would not find them.
+    extra_args.extend(get_local_dep_args())
+    extra_args.extend(get_venvs_dir_args())
 
     args = [
         sys.executable,
@@ -269,6 +329,9 @@ def run_benchmarks(
 
     if affinity := os.environ.get("CPU_AFFINITY"):
         extra_args.append(f"--affinity={affinity}")
+
+    extra_args.extend(get_local_dep_args())
+    extra_args.extend(get_venvs_dir_args())
 
     args = [
         sys.executable,
@@ -471,6 +534,20 @@ def update_metadata(
     if merge_base is not None:
         metadata["commit_merge_base"] = merge_base
     metadata["benchmark_hash"] = benchmark_definitions.get_benchmark_hash()
+    # Only present when something was overridden, so a normal result is byte
+    # for byte what it was before. When it is present it records exactly which
+    # unpushed trees produced these numbers, which is the difference between a
+    # result someone can account for later and one they cannot.
+    if local_deps := benchmark_definitions.get_local_repo_states():
+        metadata["local_deps"] = {
+            name: state.as_metadata() for name, state in sorted(local_deps.items())
+        }
+    else:
+        # Popped, not just left alone. This function updates whatever metadata
+        # is already in the file, so a key left over from an earlier write
+        # would claim a local checkout that this run did not use -- exactly the
+        # confusion the key exists to prevent.
+        metadata.pop("local_deps", None)
     if run_id is not None:
         metadata["github_action_url"] = f"{GITHUB_URL}/actions/runs/{run_id}"
     actor = os.environ.get("GITHUB_ACTOR")

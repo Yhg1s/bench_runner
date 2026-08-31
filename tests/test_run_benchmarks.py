@@ -12,6 +12,7 @@ import pytest
 
 
 from bench_runner import benchmark_definitions
+from bench_runner import cache
 from bench_runner import git
 from bench_runner.scripts import run_benchmarks
 
@@ -653,8 +654,7 @@ def runner_config(tmp_path, monkeypatch):
             'hostname = "testhost"',
         ]
         lines += [
-            f"{key} = {json.dumps(value)}"
-            for key, value in runner_fields.items()
+            f"{key} = {json.dumps(value)}" for key, value in runner_fields.items()
         ]
         (tmp_path / "bench_runner.toml").write_text("\n".join(lines) + "\n")
         monkeypatch.chdir(tmp_path)
@@ -765,3 +765,419 @@ def test_generation_targets_the_runners_own_table(tmp_path, monkeypatch, runner_
 
     assert written == (tmp_path / "runner-table.json").resolve()
     assert str(written) in [str(a) for a in captured[0]]
+
+
+# ------------------------------------------- the cross-run package cache
+
+
+def _inherited_environ(args) -> list[str]:
+    """The variables one pyperformance command line passes through to pip."""
+    args = [str(a) for a in args]
+    return args[args.index("--inherit-environ") + 1].split(",")
+
+
+def test_pip_cache_vars_are_allowlisted():
+    # pyperformance builds the benchmark venvs itself and hands pip an
+    # allowlisted environment (venv.py:_get_envvars), so a variable not named
+    # in --inherit-environ never reaches the pip that installs into them.
+    from bench_runner import cache
+
+    for var in cache.PIP_ENV_VARS:
+        assert var in run_benchmarks.ENV_VARS
+
+    # Still carrying what it carried before.
+    assert "PYTHON_JIT" in run_benchmarks.ENV_VARS
+    assert "PYPERF_PERF_RECORD_EXTRA_OPTS" in run_benchmarks.ENV_VARS
+
+
+def test_run_benchmarks_inherits_the_pip_cache_vars(tmp_path, monkeypatch):
+    from bench_runner import cache
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    inherited = _inherited_environ(captured[0])
+    for var in cache.PIP_ENV_VARS:
+        assert var in inherited
+
+
+def test_loops_table_generation_inherits_the_pip_cache_vars(tmp_path, monkeypatch):
+    # Calibration builds the same benchmark venvs, so it needs the cache just
+    # as much as the run that follows it.
+    from bench_runner import cache
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(tmp_path / "loops.json"))
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    inherited = _inherited_environ(captured[0])
+    for var in cache.PIP_ENV_VARS:
+        assert var in inherited
+
+
+# --------------------------------------------- local dependency result marking
+
+
+def _result_file(tmp_path):
+    path = tmp_path / "benchmark.json"
+    path.write_text(
+        json.dumps({"benchmarks": [{"metadata": {"name": "nbody"}}], "metadata": {}})
+    )
+    return path
+
+
+def _cpython_checkout(tmp_path, monkeypatch):
+    """Just enough of a checkout for update_metadata's git calls."""
+    from bench_runner import git as mgit
+
+    cpython = tmp_path / "cpython"
+    cpython.mkdir()
+    subprocess.check_call(["git", "init", "-q", "."], cwd=cpython)
+    (cpython / "README").write_text("x")
+    subprocess.check_call(["git", "add", "-A"], cwd=cpython)
+    subprocess.check_call(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c"],
+        cwd=cpython,
+    )
+    # Finding a merge base needs the network, and is not what these test.
+    monkeypatch.setattr(mgit, "get_git_merge_base", lambda dirname: None)
+    return cpython
+
+
+def test_metadata_records_local_deps(tmp_path, monkeypatch):
+    from bench_runner import benchmark_definitions as bd
+    from bench_runner import local_deps
+
+    pyperf = tmp_path / "pyperf"
+    pyperf.mkdir()
+    subprocess.check_call(["git", "init", "-q", "."], cwd=pyperf)
+    (pyperf / "runner.py").write_text("original")
+    subprocess.check_call(["git", "add", "-A"], cwd=pyperf)
+    subprocess.check_call(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "c"],
+        cwd=pyperf,
+    )
+    (pyperf / "runner.py").write_text("edited but not committed")
+
+    cpython = _cpython_checkout(tmp_path, monkeypatch)
+    result = _result_file(tmp_path)
+    monkeypatch.setenv(local_deps.ENV_VAR, f"pyperf={pyperf}")
+    bd.get_local_repo_state.cache_clear()
+
+    run_benchmarks.update_metadata(result, "python", "main", cpython=cpython)
+
+    metadata = json.loads(result.read_text())["metadata"]
+    recorded = metadata["local_deps"]["pyperf"]
+    assert recorded["path"] == str(pyperf)
+    assert len(recorded["commit"]) == 40
+    assert recorded["dirty"] is True
+    assert recorded["diff_sha"]
+    bd.get_local_repo_state.cache_clear()
+
+
+def test_metadata_has_no_local_deps_key_normally(tmp_path, monkeypatch):
+    from bench_runner import local_deps
+
+    monkeypatch.delenv(local_deps.ENV_VAR, raising=False)
+    monkeypatch.chdir(tmp_path)
+    cpython = _cpython_checkout(tmp_path, monkeypatch)
+    result = _result_file(tmp_path)
+
+    run_benchmarks.update_metadata(result, "python", "main", cpython=cpython)
+
+    assert "local_deps" not in json.loads(result.read_text())["metadata"]
+
+
+def test_a_stale_local_deps_key_is_removed(tmp_path, monkeypatch):
+    # update_metadata updates whatever is already in the file, so a key left
+    # over from an earlier write would claim a local checkout this run did not
+    # use -- exactly the confusion the key exists to prevent.
+    from bench_runner import local_deps
+
+    monkeypatch.delenv(local_deps.ENV_VAR, raising=False)
+    monkeypatch.chdir(tmp_path)
+    cpython = _cpython_checkout(tmp_path, monkeypatch)
+    result = tmp_path / "benchmark.json"
+    result.write_text(
+        json.dumps(
+            {
+                "benchmarks": [{"metadata": {"name": "nbody"}}],
+                "metadata": {"local_deps": {"pyperf": {"path": "/gone"}}},
+            }
+        )
+    )
+
+    run_benchmarks.update_metadata(result, "python", "main", cpython=cpython)
+
+    assert "local_deps" not in json.loads(result.read_text())["metadata"]
+
+
+# ---------------------------------------------- --local-dep passthrough
+
+
+@pytest.fixture
+def local_dep_checkout(tmp_path, monkeypatch):
+    """A configured local pyperf, as BENCH_RUNNER_LOCAL_DEPS would give it."""
+    from bench_runner import local_deps
+
+    checkout = tmp_path / "pyperf"
+    checkout.mkdir()
+    (checkout / "pyproject.toml").write_text('[project]\nname = "pyperf"\n')
+    monkeypatch.setenv(local_deps.ENV_VAR, f"pyperf={checkout}")
+    return checkout
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_local_deps(monkeypatch):
+    from bench_runner import local_deps
+
+    monkeypatch.delenv(local_deps.ENV_VAR, raising=False)
+
+
+def test_no_local_dep_args_when_nothing_is_configured(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert run_benchmarks.get_local_dep_args() == []
+
+
+def test_local_dep_args(tmp_path, monkeypatch, local_dep_checkout):
+    monkeypatch.chdir(tmp_path)
+    assert run_benchmarks.get_local_dep_args() == [
+        f"--local-dep=pyperf={local_dep_checkout}:editable"
+    ]
+
+
+def test_local_dep_args_are_sorted(tmp_path, monkeypatch):
+    from bench_runner import local_deps
+
+    for name in ("zzz", "aaa"):
+        (tmp_path / name).mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        local_deps.ENV_VAR, f"zzz={tmp_path / 'zzz'},aaa={tmp_path / 'aaa'}"
+    )
+
+    args = run_benchmarks.get_local_dep_args()
+
+    # Deterministic, so two runs build the same command line.
+    assert [a.split("=")[1] for a in args] == ["aaa", "zzz"]
+
+
+def test_run_benchmarks_passes_local_dep(tmp_path, monkeypatch, local_dep_checkout):
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--local-dep=pyperf={local_dep_checkout}:editable" in [
+        str(a) for a in captured[0]
+    ]
+
+
+def test_loops_table_passes_local_dep(tmp_path, monkeypatch, local_dep_checkout):
+    # Calibration builds the same benchmark venvs: a loop count measured
+    # against a different pyperf is not the count the run wants.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(tmp_path / "loops.json"))
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    assert f"--local-dep=pyperf={local_dep_checkout}:editable" in [
+        str(a) for a in captured[0]
+    ]
+
+
+def test_benchmark_names_does_not_pass_local_dep(
+    tmp_path, monkeypatch, local_dep_checkout
+):
+    """
+    `pyperformance list` does not accept --local-dep and does not need it: it
+    builds no venv, and it runs under the outer venv's pyperformance, which is
+    already the local checkout when one is configured.
+    """
+    captured = []
+
+    def fake_check_output(args, **kwargs):
+        captured.append([str(a) for a in args])
+        return "- nbody\n"
+
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+    monkeypatch.chdir(tmp_path)
+
+    assert run_benchmarks.get_benchmark_names("nbody") == ["nbody"]
+    assert not any(a.startswith("--local-dep") for a in captured[0])
+
+
+def test_the_spec_pyperformance_is_given_is_the_one_it_parses(tmp_path, monkeypatch):
+    """
+    A cross-repository contract with no single home: bench_runner emits the
+    spec and pyperformance parses it, and the two chose opposite defaults for a
+    bare NAME=PATH (editable here, non-editable there). They agree only because
+    an editable dep is never emitted bare. Pin that, so neither side can drift.
+    """
+    from bench_runner import local_deps
+
+    for editable in (True, False):
+        dep = local_deps.LocalDep(name="pyperf", path="/x/pyperf", editable=editable)
+        spec = dep.to_spec()
+
+        # Reparsed the way pyperformance's _localdeps.LocalDep.parse does it.
+        rest = spec.partition("=")[2]
+        reparsed_editable = False
+        for suffix, value in ((":editable", True), (":copy", False)):
+            if rest.endswith(suffix):
+                reparsed_editable = value
+                rest = rest[: -len(suffix)]
+                break
+
+        assert reparsed_editable is editable, spec
+        assert rest == "/x/pyperf"
+
+
+# ------------------------------------------------- --venvs-dir passthrough
+
+
+@pytest.fixture
+def venvs_dir_config(tmp_path, monkeypatch):
+    """A repository whose [cache] points somewhere disposable."""
+    from bench_runner import cache
+    from bench_runner import config as mconfig
+
+    def configure(**settings):
+        settings.setdefault("dir", str(tmp_path / "cache"))
+        lines = [
+            "[bases]",
+            'versions = ["3.12.0"]',
+            "",
+            "[runners.testrunner]",
+            'os = "linux"',
+            'arch = "x86_64"',
+            'hostname = "testhost"',
+            "",
+            "[cache]",
+        ]
+        for key, value in settings.items():
+            if isinstance(value, bool):
+                lines.append(f"{key} = {str(value).lower()}")
+            else:
+                lines.append(f'{key} = "{value}"')
+        (tmp_path / "bench_runner.toml").write_text("\n".join(lines) + "\n")
+        monkeypatch.chdir(tmp_path)
+        mconfig._load_config.cache_clear()
+        return tmp_path / "cache"
+
+    for name in (
+        cache.CACHE_DIR_ENV_VAR,
+        cache.NO_CACHE_ENV_VAR,
+        cache.OFFLINE_ENV_VAR,
+        cache.ABI_SCOPE_ENV_VAR,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    mconfig._load_config.cache_clear()
+    yield configure
+    mconfig._load_config.cache_clear()
+
+
+def test_venvs_dir_args(venvs_dir_config):
+    root = venvs_dir_config()
+    assert run_benchmarks.get_venvs_dir_args() == [f"--venvs-dir={root / 'venvs'}"]
+
+
+def test_venvs_dir_is_outside_the_results_repo(venvs_dir_config, tmp_path):
+    """
+    The whole point of D1: pyperformance's default nests the benchmark venvs at
+    ./venv/<runid>, where the bootstrap's rebuild of the outer venv destroys
+    them. With nothing configured they must land outside the results repository
+    altogether -- a results repo's .gitignore knows about `venv/` and no more,
+    so a directory inside it could be swept into a commit by a `git add`.
+    """
+    # No [cache].dir, so the platform cache directory: what a real repo gets.
+    venvs_dir_config(dir="")
+
+    target = Path(run_benchmarks.get_venvs_dir_args()[0].split("=", 1)[1])
+
+    assert target.is_absolute()
+    assert not target.is_relative_to(tmp_path)  # tmp_path is the results repo
+    assert target == cache.get_cache_root() / "venvs"
+
+
+def test_no_venvs_dir_when_caching_is_off(venvs_dir_config):
+    # pyperformance's own default is left in place, so behaviour is exactly
+    # what it was before any of this existed.
+    venvs_dir_config(enabled=False)
+    assert run_benchmarks.get_venvs_dir_args() == []
+
+
+def test_venvs_dir_follows_the_cache_dir_env_var(
+    venvs_dir_config, tmp_path, monkeypatch
+):
+    from bench_runner import cache
+
+    venvs_dir_config()
+    monkeypatch.setenv(cache.CACHE_DIR_ENV_VAR, str(tmp_path / "elsewhere"))
+
+    assert run_benchmarks.get_venvs_dir_args() == [
+        f"--venvs-dir={tmp_path / 'elsewhere' / 'venvs'}"
+    ]
+
+
+def test_run_benchmarks_passes_venvs_dir(tmp_path, monkeypatch, venvs_dir_config):
+    root = venvs_dir_config()
+    monkeypatch.delenv(run_benchmarks.LOOPS_FILE_ENV_VAR, raising=False)
+    captured = _stub_pyperformance(tmp_path, monkeypatch)
+
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    assert f"--venvs-dir={root / 'venvs'}" in [str(a) for a in captured[0]]
+
+
+def test_loops_table_passes_venvs_dir(tmp_path, monkeypatch, venvs_dir_config):
+    # Calibration must build its venvs where the run that follows will look.
+    root = venvs_dir_config()
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(tmp_path / "loops.json"))
+    captured = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    assert f"--venvs-dir={root / 'venvs'}" in [str(a) for a in captured[0]]
+
+
+def test_calibration_and_run_agree_on_the_venvs_dir(
+    tmp_path, monkeypatch, venvs_dir_config
+):
+    # If they disagreed, calibration would build a venv the run then rebuilds.
+    venvs_dir_config()
+    monkeypatch.setenv(run_benchmarks.LOOPS_FILE_ENV_VAR, str(tmp_path / "loops.json"))
+    calibration = _stub_calibration(tmp_path, monkeypatch, loops={"nbody": 64})
+    run_benchmarks.generate_loops_table(sys.executable, "nbody")
+
+    run = _stub_pyperformance(tmp_path, monkeypatch)
+    run_benchmarks.run_benchmarks(sys.executable, "nbody")
+
+    def venvs_dir(args):
+        return [a for a in map(str, args) if a.startswith("--venvs-dir=")]
+
+    assert venvs_dir(calibration[0]) == venvs_dir(run[0]) != []
+
+
+def test_benchmark_names_does_not_pass_venvs_dir(
+    tmp_path, monkeypatch, venvs_dir_config
+):
+    # `pyperformance list` builds no venv and does not accept the flag.
+    venvs_dir_config()
+    captured = []
+
+    def fake_check_output(args, **kwargs):
+        captured.append([str(a) for a in args])
+        return "- nbody\n"
+
+    monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+
+    assert run_benchmarks.get_benchmark_names("nbody") == ["nbody"]
+    assert not any(a.startswith("--venvs-dir") for a in captured[0])

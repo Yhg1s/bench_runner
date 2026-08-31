@@ -22,6 +22,10 @@ def set_environment_for(machine):
 
 def _main(fork: str, ref: str, machine: str, *args, **kwargs):
     set_environment_for(machine)
+    # This is the deliberate local-development entry point, so local
+    # dependencies are always allowed here -- including on the rare occasion
+    # someone runs it on a runner to debug something.
+    kwargs.setdefault("allow_local_deps", True)
     workflow._main(fork, ref, machine, *args, **kwargs)
 
 
@@ -66,6 +70,13 @@ def main():
         "for this run, instead of calibrating again inside it",
     )
     parser.add_argument(
+        "--purge-pip-cache",
+        action="store_true",
+        help="Empty pip's cache for the whole machine before installing, the "
+        "way every run used to. Not needed to keep builds apart: the package "
+        "cache is already partitioned by ABI.",
+    )
+    parser.add_argument(
         "--_fast", action="store_true", help="Use fast mode, for testing"
     )
     args = parser.parse_args()
@@ -86,4 +97,5 @@ def main():
         # of workflow._main()'s, so _fast lands in run_id. Passing this one by
         # name keeps it out of that.
         generate_loops=args.generate_loops,
+        purge_pip_cache=args.purge_pip_cache,
     )
