@@ -49,12 +49,22 @@ PLOTLY_TEMPLATE = "plotly_white"
 PLOTLYJS_MODE: bool | str = "cdn"
 
 # Options passed to plotly.js itself, as opposed to the figure.
+#
+# scrollZoom is off deliberately. These plots are tall -- one row per benchmark,
+# thousands of pixels -- so the page always scrolls, and a chart that swallows
+# the wheel traps the reader: the pointer is over the chart for almost the whole
+# width of the page, so there is nowhere left to scroll from. Zoom is still
+# available from the mode bar and by dragging out a region.
 PLOTLY_CONFIG = {
     "displaylogo": False,
     "responsive": True,
-    "scrollZoom": True,
+    "scrollZoom": False,
     "modeBarButtonsToRemove": ["select2d", "lasso2d"],
 }
+
+# The line drawn between two benchmark rows.
+ROW_SEPARATOR_COLOR = "#e6e6e6"
+ROW_SEPARATOR_WIDTH = 1
 
 
 def _plotly():
@@ -165,6 +175,154 @@ def _vertical_spacing(rows: int, default: float = 0.06) -> float:
     if rows <= 1:
         return 0.0
     return min(default, (1.0 / (rows - 1)) * 0.5)
+
+
+def _add_row_separators(fig, count: int, *, every: int = 1) -> None:
+    """
+    Draw a hairline between each pair of adjacent categories on a categorical
+    y axis.
+
+    Categories sit at integer positions, so the boundary between row `i` and
+    row `i + 1` is at `i + 0.5`. Beneath the data, so a violin that reaches the
+    full row height is not sliced in half by its own boundary.
+
+    These do more than separate rows: they tie each name in the left margin to
+    the band it belongs to, across what can be a very wide chart.
+    """
+    for i in range(every - 1, count - 1, every):
+        fig.add_shape(
+            type="line",
+            xref="paper",
+            x0=0,
+            x1=1,
+            yref="y",
+            y0=i + 0.5,
+            y1=i + 0.5,
+            line={"color": ROW_SEPARATOR_COLOR, "width": ROW_SEPARATOR_WIDTH},
+            layer="below",
+        )
+
+
+# The row that stands for "this benchmark belongs to no family".
+UNGROUPED = "(ungrouped)"
+
+
+def _benchmark_groups(
+    names: Iterable[str], overrides: dict[str, str] | None = None
+) -> dict[str, list[str]]:
+    """
+    Sort benchmark names into families, keyed by family name.
+
+    Grouped on the first token of the name, because that is what a family
+    already is: the result names are `family_variant`, so scimark_fft and
+    scimark_lu group themselves, and no external table has to be kept in step
+    with them.
+
+    pyperformance's own tags were the obvious alternative and were measured
+    against this: they cover 37% of result names to prefix's 69%, they are
+    keyed on manifest names rather than the result names a plot works in (the
+    two differ for nine families), and they split families that belong
+    together -- async_tree_none is tagged `asyncio` while async_tree_io is not.
+
+    A token only becomes a family when at least two benchmarks share it;
+    anything left over is collected under UNGROUPED, so every benchmark is in
+    exactly one group and the groups partition the chart. `overrides` maps a
+    benchmark name to a family and wins over the prefix, so a repository can
+    curate its own grouping without changing this.
+    """
+    overrides = overrides or {}
+    names = list(names)
+
+    by_prefix: dict[str, list[str]] = defaultdict(list)
+    for name in names:
+        if name not in overrides:
+            by_prefix[name.split("_")[0]].append(name)
+
+    groups: dict[str, list[str]] = defaultdict(list)
+    for name in names:
+        if name in overrides:
+            groups[overrides[name]].append(name)
+        else:
+            prefix = name.split("_")[0]
+            groups[prefix if len(by_prefix[prefix]) > 1 else UNGROUPED].append(name)
+
+    # UNGROUPED last, the families before it in name order, so the control
+    # that lists them is predictable.
+    return {
+        key: groups[key]
+        for key in sorted(groups, key=lambda k: (k == UNGROUPED, k.lower()))
+    }
+
+
+def _spread(values: np.ndarray | None) -> float:
+    """
+    How wide a benchmark's ratio distribution is, as the middle 90% of it.
+
+    A comparison whose distribution is broad is one to be suspicious of, so
+    this is worth being able to sort by: it brings the noisy measurements
+    together instead of scattering them through an ordering by delta.
+    """
+    if values is None or not len(values):
+        return 0.0
+    low, high = np.quantile(values, [0.05, 0.95])
+    return float(high - low)
+
+
+def _sort_orders(combined_data: result.CombinedData) -> dict[str, list[str]]:
+    """
+    The category orders offered by the chart's Sort control, keyed by label.
+
+    Rows run bottom to top, so the first name in a list is the bottom row.
+    Which end is the interesting one differs per ordering, and each is
+    arranged so that the interesting end is at the top, where the eye starts.
+
+    Benchmarks whose difference was not significant have no distribution and
+    no meaningful delta, so the metric orderings park them together at the
+    bottom rather than interleaving them on a value that does not mean
+    anything. Sorting by name is the exception: someone sorting by name is
+    looking for a particular benchmark, and expects to find it in the
+    alphabet whether or not it moved.
+    """
+    entries = list(combined_data)
+
+    def by_metric(key: Callable[[tuple], float]) -> list[str]:
+        return [
+            name
+            for name, _, _ in sorted(
+                entries,
+                # The significance flag first, so the insignificant block
+                # sorts below everything; name last, so that block is itself
+                # in a stable, findable order.
+                key=lambda e: (
+                    e[1] is not None,
+                    key(e) if e[1] is not None else 0.0,
+                    e[0].lower(),
+                ),
+            )
+        ]
+
+    return {
+        # Exactly the order `combined_data` arrives in -- already sorted by
+        # ratio -- so the default view is byte for byte what it was.
+        "delta": [name for name, _, _ in entries],
+        # Reversed, so that A is at the top where a reader starts reading.
+        "name": [
+            name
+            for name, _, _ in sorted(entries, key=lambda e: e[0].lower(), reverse=True)
+        ],
+        "change": by_metric(lambda e: abs(e[2] - 1.0)),
+        "spread": by_metric(lambda e: _spread(e[1])),
+    }
+
+
+# What the Sort control offers, in the order the menu lists them: the key into
+# `_sort_orders`, and how it reads with the interesting end named.
+SORT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("delta", "Sort: by change (fastest at top)"),
+    ("change", "Sort: biggest movers (either direction)"),
+    ("spread", "Sort: noisiest first"),
+    ("name", "Sort: by name (A–Z)"),
+)
 
 
 def _subsample(values: np.ndarray, count: int) -> np.ndarray:
@@ -351,15 +509,22 @@ def plot_diff_interactive(
     differences: tuple[str, str],
     *,
     max_points: int = 200,
+    order_by: str = "delta",
+    groups: dict[str, str] | None = None,
     include_plotlyjs: bool | str | None = None,
 ):
     """
     The interactive version of `plot_diff`: one violin per benchmark showing
     the distribution of the ratio between the two runs, plus an "ALL" summary.
 
-    Each benchmark is a separate trace, so it can be isolated or hidden from
-    the legend, and buttons are provided to show and hide the inner box plot
-    and the underlying samples.
+    Each benchmark is a separate trace, and the traces are collected into
+    families so a long comparison can be read a family at a time: the legend
+    lists one entry per family rather than one per benchmark, and a control
+    collapses the chart down to a single family. Further controls show and hide
+    the inner box plot and the underlying samples, and re-order the rows.
+
+    `groups` maps a benchmark name to the family it belongs to, overriding the
+    name-prefix grouping for that benchmark.
     """
     go, _ = _plotly()
 
@@ -372,7 +537,9 @@ def plot_diff_interactive(
     insignificant: list[str] = []
     violins: list[int] = []
 
-    def add_violin(name: str, values: np.ndarray, color: str, mean: float) -> None:
+    def add_violin(
+        name: str, values: np.ndarray, color: str, mean: float, group: str
+    ) -> None:
         fig.add_trace(
             go.Violin(
                 x=_subsample(values, max_points),
@@ -382,11 +549,34 @@ def plot_diff_interactive(
                 box_visible=True,
                 meanline_visible=True,
                 points=False,
+                # Where the sample points go once "Points: all" turns them on.
+                # plotly offsets them to one side of the violin by default,
+                # which for a horizontal violin means a separate strip *below*
+                # the row -- so the points read as belonging to the row beneath
+                # and the violin they describe sits alone. 0 puts them over the
+                # centre of their own violin, and plotly draws the point layer
+                # after the body, so they land on top of the fill rather than
+                # behind it. The jitter keeps the band inside the row: half of
+                # 0.3 is well within the 0.9 width.
+                pointpos=0,
+                jitter=0.3,
+                marker={
+                    "size": 3,
+                    "opacity": 0.5,
+                    "color": mplot.to_css_color(color),
+                    "line": {"width": 0},
+                },
                 width=0.9,
                 spanmode="hard",
                 line={"width": 1, "color": mplot.to_css_color(color)},
                 fillcolor=mplot.to_css_color(color, 0.5),
-                legendgroup=name,
+                # Grouped by family, and kept out of the legend: one entry
+                # per benchmark made the legend a second, differently spaced
+                # list of every row running down the side of the chart, which
+                # is what made the names look misaligned with the rows. The
+                # per-family proxies below carry the legend instead.
+                legendgroup=group,
+                showlegend=False,
                 hovertemplate=(
                     f"<b>{name}</b><br>mean {mean:.4f}×<br>%{{x:.4f}}×<extra></extra>"
                 ),
@@ -394,37 +584,133 @@ def plot_diff_interactive(
         )
         violins.append(len(fig.data) - 1)
 
+    families = _benchmark_groups((name for name, _, _ in combined_data), groups)
+    group_of = {name: group for group, members in families.items() for name in members}
+    # Which traces belong to which family, so the collapse control can name
+    # them. ALL summarises every family, so it belongs to none and is never
+    # collapsed away.
+    traces_of: dict[str, list[int]] = defaultdict(list)
+
     for name, values, mean in combined_data:
         if values is None:
             insignificant.append(name)
             continue
         parts.append(values)
         color = "red" if name in mplot.INTERPRETER_HEAVY else "C0"
-        add_violin(name, values, color, mean)
+        add_violin(name, values, color, mean, group_of[name])
+        traces_of[group_of[name]].append(len(fig.data) - 1)
 
     if len(parts):
         all_values = np.concatenate(parts)
         all_values.sort()
-        add_violin("ALL", all_values, "C2", float(all_values.mean()))
+        add_violin("ALL", all_values, "C2", float(all_values.mean()), "ALL")
+        # Recorded so collapsing keeps it: every collapsed view still shows the
+        # summary, and a row listed on the axis with nothing drawn in it is a
+        # blank band.
+        traces_of["ALL"].append(len(fig.data) - 1)
 
-    if len(insignificant):
+    # One trace per family rather than one for all of them: collapsing to a
+    # family has to be able to hide the other families' insignificant markers,
+    # and a single trace can only be shown or hidden as a whole.
+    for group, members in families.items():
+        hidden = [name for name in members if name in insignificant]
+        if not hidden:
+            continue
         fig.add_trace(
             go.Scatter(
-                x=[1.0] * len(insignificant),
-                y=insignificant,
+                x=[1.0] * len(hidden),
+                y=hidden,
                 mode="markers",
                 name="insignificant",
+                legendgroup=group,
+                showlegend=False,
                 marker={"symbol": "line-ns-open", "size": 10, "color": "#888"},
                 hovertemplate="<b>%{y}</b><br>insignificant<extra></extra>",
+            )
+        )
+        traces_of[group].append(len(fig.data) - 1)
+
+    # A drawing-nothing trace per family, carrying that family's legend entry.
+    # This is what turns the legend from a list of every benchmark into a list
+    # of families: click one to hide the family in place, or use the collapse
+    # control below to take its rows out of the axis entirely.
+    for group in families:
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                name=group,
+                legendgroup=group,
+                showlegend=True,
+                hoverinfo="skip",
+                marker={"symbol": "square", "size": 9, "color": "#7f7f7f"},
             )
         )
 
     # The violins are added in `combined_data` order, but the insignificant
     # results are collected into a single trace at the end, so the category
     # order has to be pinned explicitly to keep everything sorted by mean.
-    order = [name for name, _, _ in combined_data]
+    #
+    # Every ordering the Sort control offers is computed here and shipped in
+    # the file, so re-sorting is a relayout in the browser rather than a
+    # regeneration: the reader can look at the same comparison by delta, by
+    # how far it moved, by how noisy it was, or by name, without going back to
+    # whoever produced it. ALL is appended to each rather than sorted with the
+    # rest -- it is a summary of the others, so it stays pinned at the top.
+    orders = _sort_orders(combined_data)
     if len(all_values):
-        order.append("ALL")
+        for names in orders.values():
+            names.append("ALL")
+    if order_by not in orders:
+        raise ValueError(
+            f"Unknown ordering {order_by!r}. Must be one of "
+            f"{', '.join(sorted(orders))}."
+        )
+    order = orders[order_by]
+
+    # The collapse control. Every state is precomputed and shipped, so
+    # collapsing is a relayout in the browser rather than a regeneration --
+    # the same trick the Sort control uses. Only families worth collapsing get
+    # an entry; a family of one is just a row.
+    def _visibility(keep: str | None) -> list[bool]:
+        """Which traces survive when the chart is collapsed to `keep`."""
+        if keep is None:
+            return [True] * len(fig.data)
+        survivors = set(traces_of[keep]) | set(traces_of["ALL"])
+        # The legend proxies stay visible whatever is collapsed, so the reader
+        # can see which families exist and get back to them.
+        survivors |= set(range(len(fig.data) - len(families), len(fig.data)))
+        return [i in survivors for i in range(len(fig.data))]
+
+    def _rows(keep: str | None) -> list[str]:
+        if keep is None:
+            return order
+        kept = set(families[keep]) | {"ALL"}
+        return [name for name in order if name in kept]
+
+    collapse_buttons = [
+        {
+            "label": "Show: every family",
+            "method": "update",
+            "args": [
+                {"visible": _visibility(None)},
+                {"yaxis.categoryarray": _rows(None), "yaxis.categoryorder": "array"},
+            ],
+        }
+    ]
+    collapse_buttons += [
+        {
+            "label": f"Only: {group} ({len(members)})",
+            "method": "update",
+            "args": [
+                {"visible": _visibility(group)},
+                {"yaxis.categoryarray": _rows(group), "yaxis.categoryorder": "array"},
+            ],
+        }
+        for group, members in families.items()
+        if len(members) > 1
+    ]
 
     fig.update_layout(
         title=title,
@@ -433,7 +719,7 @@ def plot_diff_interactive(
         margin={"l": 220, "r": 40, "t": 100, "b": 60},
         violinmode="overlay",
         hovermode="closest",
-        legend={"traceorder": "reversed"},
+        legend={"traceorder": "normal", "groupclick": "togglegroup"},
         updatemenus=[
             {
                 "type": "buttons",
@@ -479,6 +765,58 @@ def plot_diff_interactive(
                     },
                 ],
             },
+            {
+                # A dropdown rather than a button row: four labels side by
+                # side would not fit, and a closed dropdown shows the active
+                # ordering, which the button groups above cannot.
+                "type": "dropdown",
+                "showactive": True,
+                "x": 0.36,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "bottom",
+                "pad": {"b": 6},
+                "active": [key for key, _ in SORT_CHOICES].index(order_by),
+                "buttons": [
+                    {
+                        "label": label,
+                        # "update", not "relayout": re-ordering restores every
+                        # row as well as re-ordering them. A sort that left a
+                        # collapsed family hidden would put its categories back
+                        # on the axis with nothing drawn in them, i.e. a band of
+                        # blank rows. Each control therefore sets a whole view,
+                        # and sorting is the one that means "all of it, in this
+                        # order".
+                        "method": "update",
+                        "args": [
+                            {"visible": [True] * len(fig.data)},
+                            # categoryorder is repeated because the update
+                            # replaces only what it names, and "array" is what
+                            # makes categoryarray mean anything.
+                            {
+                                "yaxis.categoryorder": "array",
+                                "yaxis.categoryarray": orders[key],
+                            },
+                        ],
+                    }
+                    for key, label in SORT_CHOICES
+                ],
+            },
+            {
+                # Collapsing to one family is a combined update: hide the other
+                # families' traces AND drop their categories from the axis. The
+                # legend on its own can only do the first, which would leave the
+                # collapsed rows behind as blank bands.
+                "type": "dropdown",
+                "showactive": True,
+                "x": 0.62,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "bottom",
+                "pad": {"b": 6},
+                "active": 0,
+                "buttons": collapse_buttons,
+            },
         ],
     )
     fig.update_xaxes(
@@ -486,7 +824,21 @@ def plot_diff_interactive(
         range=_clamped_range(all_values, 0.75, 1.25),
         **_ratio_axis(),
     )
-    fig.update_yaxes(categoryorder="array", categoryarray=order, automargin=True)
+    # tickmode="array" rather than the default "auto". On a categorical axis
+    # plotly picks a tick interval from the pixels available per row, and once
+    # a chart is dense enough it starts labelling every second or third
+    # category -- at which point the labels no longer name the rows they sit
+    # beside, and the reader has to count. Naming every category explicitly
+    # pins one label to each row whatever the height works out to.
+    fig.update_yaxes(
+        categoryorder="array",
+        categoryarray=order,
+        tickmode="array",
+        tickvals=order,
+        ticktext=order,
+        automargin=True,
+    )
+    _add_row_separators(fig, len(order))
     fig.add_vline(x=1.0, line_width=1, line_color="#444")
 
     save_html(fig, output_filename, include_plotlyjs=include_plotlyjs)
