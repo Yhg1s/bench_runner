@@ -348,6 +348,86 @@ A few things to know:
 
 If you don't want to enable Pages, leave `base_url` empty. The links stay relative, which means they work when you open the markdown from a local clone, but not on github.com. Third-party viewers such as `htmlpreview.github.io` or `raw.githack.com` can render a single file from a public repository if you paste its URL in, and either can be used as `base_url`, but both are rate-limited free services with no availability guarantee, so neither is a good default for a repository you expect people to browse.
 
+#### The package cache
+
+Every run builds a virtual environment for the interpreter under test and installs the benchmarks' dependencies into it. By default those downloads and builds are kept between runs, in `~/.cache/bench_runner` (or `$XDG_CACHE_HOME/bench_runner`, or `%LOCALAPPDATA%\bench_runner` on Windows).
+
+This is pip's own cache, with one wrinkle: it is partitioned by the *ABI* of the interpreter being installed into, while the downloaded archives are shared across every partition. Wheels built for one interpreter therefore cannot be handed to another, but nothing is ever downloaded twice.
+
+The partition key is `<implementation><X.Y>-<soabi>-<platform>-<digest>`, and `abi_scope` chooses what the digest covers:
+
+| `abi_scope` | The digest covers | Shares built wheels between |
+| ----------- | ----------------- | --------------------------- |
+| `headers` (default) | every `*.h` under the interpreter's include directory, plus `pyconfig.h` | builds whose headers are identical, so PGO/LTO/BOLT variants of one commit share, while a commit that touches a header does not |
+| `build` | the interpreter's full build identity | nothing — every build gets its own |
+| `version` | nothing beyond X.Y, SOABI and platform | every build of that version, which is only safe if you know your dependencies are pure Python |
+
+`headers` is the right default because a C extension's whole compile-time contract with CPython is the headers: two builds that touch none of them are interchangeable, and one that touches any of them is not. It also partitions `--enable-experimental-jit` automatically, because that changes `pyconfig.h`. Use `build` if you ever see an extension misbehave in a way the headers did not predict.
+
+Independently of that, wheels tagged `*-none-any` — the ones with no compiled extension, which pip had to build from an sdist — are hardlinked into a shared wheelhouse and offered to every interpreter. pip filters those by compatibility tag exactly as it filters its own cache, so nothing incompatible can be served from it.
+
+Configure it in `bench_runner.toml`:
+
+```toml
+[cache]
+enabled = true            # false restores the old behaviour: purge and start cold every run
+dir = ""                  # empty means the platform cache directory
+abi_scope = "headers"     # headers | build | version
+offline = false           # true forbids pip from reaching the network at all
+share_pure_wheels = true  # collect *-none-any wheels into a wheelhouse shared by every ABI
+max_age_days = 30         # how long an unused entry survives a prune
+```
+
+`offline = true` needs more from the cache than it might appear, so it is worth knowing what it can and cannot do. Under `--no-index` pip has no index to resolve a requirement against, and its *built-wheel* cache is keyed on the URL a distribution came from — with no URL to look up, that cache is unreachable. What does work offline is the shared wheelhouse, because a find-links directory is an installable source in its own right. So an offline run can only install a dependency that is pure Python **and** shipped as an sdist (so pip had to build a wheel, which is what puts one in `wheels/` to be swept) **and** already swept by an earlier warm run. Anything with a compiled extension, and anything that ships a pre-built wheel, is not available offline. The always-available win needs no flag: on a warm run pip still asks the index for metadata, but nothing is re-downloaded and nothing is rebuilt.
+
+Four environment variables override the configuration, for one-off runs:
+
+| Variable | Effect |
+| -------- | ------ |
+| `BENCH_RUNNER_CACHE_DIR` | Where the cache lives, overriding `dir` |
+| `BENCH_RUNNER_CACHE_ABI_SCOPE` | `headers`, `build` or `version`, overriding `abi_scope` |
+| `BENCH_RUNNER_OFFLINE=1` | Run pip with `--no-index` |
+| `BENCH_RUNNER_NO_CACHE=1` | Turn the cache off entirely |
+
+To see what is in it, or to tidy it up:
+
+```
+python -m bench_runner cache              # what is cached, and how big it is
+python -m bench_runner cache --prune      # drop entries unused for max_age_days
+python -m bench_runner cache --clear      # throw the whole thing away
+```
+
+`--prune` takes `--max-age-days` if you want a different cutoff than the configured one. Note that a cache accumulates one partition per distinct interpreter ABI, so a machine that builds a lot of CPython commits wants an occasional prune.
+
+The benchmark virtual environments themselves live under the same root, in `<cache>/venvs`, rather than at pyperformance's default of `./venv/<runid>`. That default nests them inside the outer venv, so rebuilding the outer venv — which the workflow bootstrap does at the start of every run — destroys every benchmark venv with it. Keeping them outside the results repository also means no `git add` can sweep them up, which a directory alongside `venv/` would risk, since a results repository's `.gitignore` knows about `venv/` and nothing else. Two consequences: `cache --clear` removes the benchmark venvs too, and `cache --info` reports them on their own line, since they are usually the largest thing under the root.
+
+#### Testing a change to pyperf or pyperformance
+
+Normally every repository in the chain — pyperformance, pyston-benchmarks, pyperf — is fetched at a pinned commit, so trying a change to one of them means pushing it first. A local dependency replaces that pin with a directory on this machine: the checkout is left alone rather than being reset to the pin, and the virtual environments install from the path.
+
+```toml
+[dev.local_deps]
+pyperformance = { path = "~/python/pyperformance", editable = true }
+pyperf        = { path = "~/python/pyperf" }
+```
+
+A key is a distribution name (`pyperf`) or one of the benchmark repository directory names (`pyperformance`, `pyston-benchmarks`); `pyperformance` is both, since it is cloned *and* installed. `editable` defaults to true, which installs the checkout as a link, so later edits take effect with no reinstall at all.
+
+The same thing without a configuration file, which is what you want for a one-off or in a directory that is not a results repository:
+
+```
+BENCH_RUNNER_LOCAL_DEPS="pyperf=~/python/pyperf:editable,pyperformance=~/python/pyperformance"
+```
+
+A `local_deps` table on one runner overrides both, which is what a repository with one development machine and several real runners wants. The three do not merge: the most specific one that says anything provides the whole set, so a runner can say `local_deps = {}` to turn off dependencies configured repository-wide. Precedence is runner table, then environment variable, then `[dev.local_deps]`.
+
+Two more things worth knowing:
+
+- **Local dependencies change the benchmark hash.** A result built from a working tree cannot be reproduced by anyone else, so it must never be mistaken for one built from a pushed commit. Each local checkout contributes a `local:` marker, its HEAD, and a digest of its uncommitted changes to `benchmark_hash`, which means such a result can never collide with a pushed one — and editing the tree and running again produces a different hash again, rather than reusing the earlier result. The result file also records what was used, in `metadata.local_deps`. This is intended; do not reach for `BENCH_RUNNER_IGNORE_BENCHMARK_HASH` to paper over it.
+- **CI refuses to run with them.** If `GITHUB_ACTIONS` is set and any local dependency is configured, the workflow fails at startup rather than publishing an unreproducible result. Set `BENCH_RUNNER_ALLOW_LOCAL_DEPS=1` if you really mean it. `local_workflow` is exempt, since it is the local-development entry point.
+
+If your outer virtual environment is not at `<results-repo>/venv`, point `BENCH_RUNNER_VENV` at it. Outside CI it defaults to whichever virtual environment `bench_runner` is itself running in.
+
 #### Purging old data
 
 With a local checkout of your results repository you can perform some maintenance tasks.
