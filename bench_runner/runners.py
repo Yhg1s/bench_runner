@@ -7,6 +7,7 @@ import socket
 from typing import Literal
 
 
+from . import local_deps as mlocal_deps
 from .util import PathLike
 
 
@@ -56,6 +57,12 @@ class Runner:
     # lets an explicit `no_calibrate = false` here turn the variable off for
     # one runner while it stays on everywhere else.
     no_calibrate: bool | None = None
+    # The local checkouts to install on this runner instead of the pinned
+    # versions, overriding [dev.local_deps] and BENCH_RUNNER_LOCAL_DEPS. None
+    # means "not configured"; an explicit empty table turns local deps off for
+    # this runner while they stay on everywhere else, which is what a
+    # repository with one development machine and several real runners wants.
+    local_deps: dict[str, mlocal_deps.LocalDep] | None = None
     # The groups this runner belongs to. Not configured per-runner: filled in
     # from the [groups] sections by groups.get_groups().
     groups: set[str] = dataclasses.field(default_factory=set)
@@ -63,6 +70,8 @@ class Runner:
     def __post_init__(self):
         if self.github_runner_name is None:
             self.github_runner_name = self.name
+        if self.local_deps is not None:
+            self.local_deps = mlocal_deps.coerce(self.local_deps)
         if self.plot is None:
             self.plot = PlotConfig(name=self.nickname)
         else:

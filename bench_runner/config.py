@@ -8,7 +8,9 @@ from pathlib import Path
 import tomllib
 
 
+from . import cache as mcache
 from . import flags as mflags
+from . import local_deps as mlocal_deps
 from . import plot as mplot
 from . import runners as mrunners
 from .util import PathLike
@@ -97,6 +99,8 @@ class Config:
     interactive_plots: InteractivePlots = dataclasses.field(
         default_factory=InteractivePlots
     )
+    dev: mlocal_deps.Dev = dataclasses.field(default_factory=mlocal_deps.Dev)
+    cache: mcache.Cache = dataclasses.field(default_factory=mcache.Cache)
     weekly: dict[str, Weekly] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
@@ -134,6 +138,10 @@ class Config:
             )
         if isinstance(self.interactive_plots, dict):
             self.interactive_plots = InteractivePlots(**self.interactive_plots)
+        if isinstance(self.dev, dict):
+            self.dev = mlocal_deps.Dev(**self.dev)
+        if isinstance(self.cache, dict):
+            self.cache = mcache.Cache(**self.cache)
         if len(self.weekly) == 0:
             self.weekly = {"default": Weekly(runners=list(self.runners.keys()))}
         else:
