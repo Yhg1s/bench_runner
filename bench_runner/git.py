@@ -49,6 +49,29 @@ def get_git_commit_date(dirname: PathLike) -> str:
     return get_log("%cI", dirname)
 
 
+def get_status(dirname: PathLike) -> str:
+    """
+    `git status --porcelain`: one line per changed or untracked path.
+
+    Note this names untracked files but says nothing about their contents, so
+    it detects a file being added but not that file later being edited.
+    """
+    return subprocess.check_output(
+        ["git", "status", "--porcelain"],
+        encoding="utf-8",
+        cwd=dirname,
+    )
+
+
+def get_diff(dirname: PathLike, ref: str = "HEAD") -> str:
+    """The working tree's uncommitted changes against `ref`."""
+    return subprocess.check_output(
+        ["git", "diff", ref],
+        encoding="utf-8",
+        cwd=dirname,
+    )
+
+
 def remove(repodir: Path, path: PathLike) -> None:
     subprocess.check_output(
         ["git", "rm", str(path)],
